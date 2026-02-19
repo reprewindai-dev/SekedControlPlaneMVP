@@ -1,0 +1,118 @@
+// Seked Control Plane - MVP Schema
+// Minimal Viable Enterprise Foundation
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// MULTI-TENANCY CORE
+// =============================================================================
+
+model Org {
+  id        String   @id @default(uuid())
+  name      String
+  plan      String   // tier1, tier2, tier3, enterprise
+  createdAt DateTime @default(now())
+  
+  // Relations
+  projects  Project[]
+  apiKeys   ApiKey[]
+  policies  PolicyProfile[]
+  
+  @@map("orgs")
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  orgId       String
+  name        String
+  environment String   // prod, staging, dev
+  
+  // Relations
+  org         Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs        Run[]
+  
+  @@unique([orgId, name, environment])
+  @@map("projects")
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  hashedKey String   // bcrypt hash
+  role      String   // admin, developer, readonly
+  createdAt DateTime @default(now())
+  lastUsedAt DateTime?
+  
+  // Relations
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  
+  @@map("api_keys")
+}
+
+// =============================================================================
+// RUNS + EVENTS (AUDIT LEDGER)
+// =============================================================================
+
+model Run {
+  id              String   @id @default(uuid())
+  orgId           String
+  projectId       String
+  policyProfileId String
+  schemaId        String
+  status          String   // queued, running, blocked, completed, failed
+  finalOutput     Json?    // Encrypted at rest
+  createdAt       DateTime @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+  
+  // Relations
+  org             Org          @relation(fields: [orgId], references: [id])
+  project         Project      @relation(fields: [projectId], references: [id])
+  policyProfile   PolicyProfile @relation(fields: [policyProfileId], references: [id])
+  events          RunEvent[]
+  
+  @@map("runs")
+}
+
+model RunEvent {
+  id     String   @id @default(uuid())
+  runId  String
+  type   String   // RUN_CREATED, POLICY_EVALUATED, SEKED_SCORED, CONVERGE_ATTEMPTED, CONVERGE_PASSED, ECOBE_ROUTED, RUN_COMPLETED
+  data   Json     // Event-specific data
+  ts     DateTime @default(now())
+  
+  // Relations
+  run    Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  
+  @@index([runId, ts])
+  @@map("run_events")
+}
+
+// =============================================================================
+// POLICY ENGINE
+// =============================================================================
+
+model PolicyProfile {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  config    Json     // Policy configuration (seked, converge, ecobe settings)
+  version   Int      @default(1)
+  status    String   @default("draft") // draft, approved
+  createdAt DateTime @default(now())
+  
+  // Relations
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs      Run[]
+  
+  @@unique([orgId, name])
+  @@map("policy_profiles")
+}

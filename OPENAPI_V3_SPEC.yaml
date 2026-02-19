@@ -1,0 +1,879 @@
+openapi: 3.0.3
+info:
+  title: Seked Control Plane API
+  description: Enterprise AI Governance Platform - Three Plane Governance (Cognitive + Output + Resource)
+  version: 1.0.0
+  contact:
+    name: Seked Control Plane
+    email: api@seked-controlplane.com
+  license:
+    name: Commercial
+    url: https://seked-controlplane.com/license
+
+servers:
+  - url: https://api.seked-controlplane.com/v1
+    description: Production
+  - url: https://staging-api.seked-controlplane.com/v1
+    description: Staging
+
+paths:
+  /runs:
+    post:
+      tags:
+        - Runs
+      summary: Create a governed run
+      description: Submit a request for three-plane governance processing
+      operationId: createRun
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+            examples:
+              invoiceExtraction:
+                summary: Invoice Extraction Task
+                value:
+                  request_id: "client-optional-123"
+                  policy_profile_id: "pol_prof_001"
+                  schema_id: "sch_invoice_v3"
+                  task:
+                    type: "invoice_extraction"
+                    risk_level: "medium"
+                    requires_pii: true
+                  inputs:
+                    prompt: "Extract invoice fields from the document"
+                    context:
+                      document_text: "Invoice #INV-2024-001\nDate: 2024-01-15\nTotal: $1,234.56"
+                  constraints:
+                    latency_ms_max: 2500
+                    cost_usd_max: 0.05
+                    carbon_mode: "minimize"
+                  execution:
+                    provider_preference: ["openai", "anthropic"]
+                    region_allowlist: ["us-east-1", "us-west-2", "ca-central-1"]
+      responses:
+        '201':
+          description: Run created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /runs/{run_id}:
+    get:
+      tags:
+        - Runs
+      summary: Get run status and result
+      description: Retrieve the current status and final result of a governed run
+      operationId: getRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Unique identifier for the run
+      responses:
+        '200':
+          description: Run details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /runs/{run_id}/events:
+    get:
+      tags:
+        - Runs
+      summary: Stream run events
+      description: Retrieve ordered events for a run (for dashboards and SIEM integration)
+      operationId: getRunEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+          description: Maximum number of events to return
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Return events after this timestamp
+      responses:
+        '200':
+          description: Events retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RunEvent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies:
+    post:
+      tags:
+        - Policies
+      summary: Create policy profile
+      description: Create a new governance policy profile
+      operationId: createPolicy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+      responses:
+        '201':
+          description: Policy created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Policy with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies/{policy_id}:
+    get:
+      tags:
+        - Policies
+      summary: Get policy profile
+      description: Retrieve a specific policy profile
+      operationId: getPolicy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: policy_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Policy identifier
+      responses:
+        '200':
+          description: Policy retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies/{policy_id}/versions:
+    post:
+      tags:
+        - Policies
+      summary: Create new policy version
+      description: Create a new version of an existing policy
+      operationId: createPolicyVersion
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: policy_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+      responses:
+        '201':
+          description: Policy version created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /policies/{policy_id}/approve:
+    post:
+      tags:
+        - Policies
+      summary: Approve policy version
+      description: Approve a policy version for production use (4-eyes control)
+      operationId: approvePolicy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: policy_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: integer
+                  description: Policy version to approve
+                approver_notes:
+                  type: string
+                  description: Optional approval notes
+              required:
+                - version
+      responses:
+        '200':
+          description: Policy approved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Policy'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Policy version already approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /schemas:
+    post:
+      tags:
+        - Schemas
+      summary: Create output schema
+      description: Create a new JSON schema for output validation
+      operationId: createSchema
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSchemaRequest'
+      responses:
+        '201':
+          description: Schema created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schema'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Schema with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /schemas/{schema_id}:
+    get:
+      tags:
+        - Schemas
+      summary: Get output schema
+      description: Retrieve a specific output schema
+      operationId: getSchema
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: schema_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Schema retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schema'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: System health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CreateRunRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+          description: Optional client-provided request identifier
+        policy_profile_id:
+          type: string
+          description: Policy profile to apply
+        schema_id:
+          type: string
+          description: Output schema for validation
+        task:
+          type: object
+          properties:
+            type:
+              type: string
+              description: Task type (e.g., invoice_extraction)
+            risk_level:
+              type: string
+              enum: [low, medium, high, critical]
+            requires_pii:
+              type: boolean
+              description: Whether task requires PII processing
+          required:
+            - type
+        inputs:
+          type: object
+          properties:
+            prompt:
+              type: string
+              description: Main prompt/task description
+            context:
+              type: object
+              description: Additional context data
+              additionalProperties: true
+          required:
+            - prompt
+        constraints:
+          type: object
+          properties:
+            latency_ms_max:
+              type: integer
+              minimum: 0
+            cost_usd_max:
+              type: number
+              minimum: 0
+            carbon_mode:
+              type: string
+              enum: [minimize, balance, ignore]
+          required:
+            - latency_ms_max
+        execution:
+          type: object
+          properties:
+            provider_preference:
+              type: array
+              items:
+                type: string
+              description: Preferred model providers in order
+            region_allowlist:
+              type: array
+              items:
+                type: string
+              description: Allowed regions for execution
+      required:
+        - policy_profile_id
+        - schema_id
+        - task
+        - inputs
+        - constraints
+
+    CreateRunResponse:
+      type: object
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          description: Unique run identifier
+        status:
+          type: string
+          enum: [queued, running, blocked, completed, failed]
+          description: Initial run status
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              format: uri
+            events:
+              type: string
+              format: uri
+          required:
+            - self
+            - events
+      required:
+        - run_id
+        - status
+        - links
+
+    RunDetails:
+      type: object
+      properties:
+        run_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, blocked, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        result:
+          type: object
+          properties:
+            output:
+              type: object
+              description: Final validated output
+              additionalProperties: true
+            schema_valid:
+              type: boolean
+              description: Whether output conforms to schema
+          nullable: true
+        governance:
+          type: object
+          properties:
+            escalation_level:
+              type: integer
+              minimum: 0
+              maximum: 2
+            detrimental_score:
+              type: number
+              minimum: 0
+              maximum: 1
+            fracture_detected:
+              type: boolean
+            drift_delta:
+              type: number
+              minimum: 0
+              maximum: 1
+            required_validations:
+              type: object
+              properties:
+                watchtower_confirmations:
+                  type: integer
+                shadow_tracking_depth:
+                  type: string
+                  enum: [none, light, deep]
+          required:
+            - escalation_level
+            - detrimental_score
+            - fracture_detected
+            - drift_delta
+        routing:
+          type: object
+          properties:
+            provider:
+              type: string
+            region:
+              type: string
+            carbon_intensity_gco2_kwh:
+              type: number
+              minimum: 0
+            estimated_cost_usd:
+              type: number
+              minimum: 0
+            estimated_latency_ms:
+              type: integer
+              minimum: 0
+          required:
+            - provider
+            - region
+        convergence:
+          type: object
+          properties:
+            attempts:
+              type: integer
+              minimum: 1
+            quality_score:
+              type: number
+              minimum: 0
+              maximum: 1
+            converged:
+              type: boolean
+          required:
+            - attempts
+            - quality_score
+            - converged
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+          nullable: true
+      required:
+        - run_id
+        - status
+        - created_at
+        - governance
+        - routing
+        - convergence
+
+    RunEvent:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - RUN_CREATED
+            - POLICY_EVALUATED
+            - SEKED_SCORED
+            - CONVERGE_ATTEMPTED
+            - CONVERGE_PASSED
+            - CONVERGE_FAILED
+            - ECOBE_ROUTED
+            - RUN_COMPLETED
+            - RUN_BLOCKED
+        ts:
+          type: string
+          format: date-time
+        data:
+          type: object
+          description: Event-specific data
+          additionalProperties: true
+      required:
+        - type
+        - ts
+        - data
+
+    CreatePolicyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Human-readable policy name
+        description:
+          type: string
+          description: Policy description
+        seked:
+          type: object
+          properties:
+            escalation_thresholds:
+              type: object
+              properties:
+                tier0:
+                  $ref: '#/components/schemas/EscalationThreshold'
+                tier1:
+                  $ref: '#/components/schemas/EscalationThreshold'
+                tier2:
+                  $ref: '#/components/schemas/EscalationThreshold'
+              required:
+                - tier0
+                - tier1
+                - tier2
+            reference_stars_locked:
+              type: boolean
+              description: Whether Reference Stars are locked from modification
+            max_tier2_per_minute:
+              type: integer
+              minimum: 0
+              description: Rate limit for Tier 2 escalations
+          required:
+            - escalation_thresholds
+        converge:
+          type: object
+          properties:
+            max_attempts:
+              type: integer
+              minimum: 1
+              maximum: 10
+            quality_threshold:
+              type: number
+              minimum: 0
+              maximum: 1
+            hard_fail_on_schema:
+              type: boolean
+          required:
+            - max_attempts
+            - quality_threshold
+        ecobe:
+          type: object
+          properties:
+            carbon_mode:
+              type: string
+              enum: [minimize, balance, ignore]
+            weights:
+              type: object
+              properties:
+                carbon:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                latency:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+                cost:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+              additionalProperties: false
+              required:
+                - carbon
+                - latency
+                - cost
+            provider_allowlist:
+              type: array
+              items:
+                type: string
+            region_allowlist:
+              type: array
+              items:
+                type: string
+          required:
+            - carbon_mode
+            - weights
+      required:
+        - name
+        - seked
+        - converge
+        - ecobe
+
+    EscalationThreshold:
+      type: object
+      properties:
+        detrimental_max:
+          type: number
+          minimum: 0
+          maximum: 1
+        fracture_max:
+          type: number
+          minimum: 0
+          maximum: 1
+      required:
+        - detrimental_max
+        - fracture_max
+
+    Policy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, approved, deprecated]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        seked:
+          $ref: '#/components/schemas/CreatePolicyRequest/properties/seked'
+        converge:
+          $ref: '#/components/schemas/CreatePolicyRequest/properties/converge'
+        ecobe:
+          $ref: '#/components/schemas/CreatePolicyRequest/properties/ecobe'
+      required:
+        - id
+        - name
+        - version
+        - status
+        - created_at
+        - seked
+        - converge
+        - ecobe
+
+    CreateSchemaRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        json_schema:
+          type: object
+          description: JSON Schema definition
+      required:
+        - name
+        - json_schema
+
+    Schema:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        version:
+          type: integer
+        json_schema:
+          type: object
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - version
+        - json_schema
+        - created_at
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      required:
+        - error
+        - message
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+tags:
+  - name: Runs
+    description: Run management and monitoring
+  - name: Policies
+    description: Policy profile management
+  - name: Schemas
+    description: Output schema management
+  - name: System
+    description: System health and status

@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seked Stability Stack - Live Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+      
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+      
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+      
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+      
+        .header h1 {
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+      
+        .header p {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 1.1rem;
+        }
+      
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+      
+        @media (max-width: 968px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+      
+        .panel {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+      
+        .panel h2 {
+            margin-bottom: 20px;
+            color: #333;
+            font-size: 1.5rem;
+        }
+      
+        .input-section {
+            margin-bottom: 20px;
+        }
+      
+        .input-section label {
+            display: block;
+            margin-bottom: 8px;
+            color: #666;
+            font-weight: 500;
+        }
+      
+        .input-section textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+        }
+      
+        .input-section textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+      
+        .options-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+      
+        .option-group {
+            display: flex;
+            flex-direction: column;
+        }
+      
+        .option-group label {
+            margin-bottom: 5px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+      
+        .option-group input {
+            padding: 8px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+      
+        .option-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+      
+        .execute-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+      
+        .execute-btn:hover {
+            transform: translateY(-2px);
+        }
+      
+        .execute-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+      
+        .result-section {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            min-height: 100px;
+        }
+      
+        .result-section h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+      
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+      
+        .metric-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+      
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+      
+        .metric-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+      
+        .decision-log {
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+      
+        .decision-log h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+      
+        .log-entry {
+            padding: 15px;
+            border-left: 4px solid #667eea;
+            background: #f8f9fa;
+            margin-bottom: 15px;
+            border-radius: 0 8px 8px 0;
+        }
+      
+        .log-entry.tier-0 {
+            border-left-color: #4caf50;
+        }
+      
+        .log-entry.tier-1 {
+            border-left-color: #ff9800;
+        }
+      
+        .log-entry.tier-2 {
+            border-left-color: #f44336;
+        }
+      
+        .log-entry h4 {
+            margin-bottom: 8px;
+            color: #333;
+        }
+      
+        .log-entry .timestamp {
+            color: #999;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+        }
+      
+        .log-entry .details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+      
+        .log-entry .detail-item {
+            display: flex;
+            justify-content: space-between;
+        }
+      
+        .log-entry .detail-label {
+            color: #666;
+        }
+      
+        .log-entry .detail-value {
+            font-weight: 600;
+            color: #333;
+        }
+      
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+      
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+      
+        .error {
+            color: #f44336;
+            background: #ffebee;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+      
+        .success {
+            color: #4caf50;
+            background: #e8f5e8;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Seked Stability Stack</h1>
+            <p>Three-Layer AI Governance: Seked → ConvergeOS → ECOBE</p>
+        </div>
+      
+        <div class="main-content">
+            <div class="panel">
+                <h2>Execute Request</h2>
+                
+                <div class="input-section">
+                    <label for="request">Request:</label>
+                    <textarea id="request" placeholder="Enter your request here...">Generate a business strategy for reducing carbon emissions</textarea>
+                </div>
+                
+                <div class="options-grid">
+                    <div class="option-group">
+                        <label for="qualityThreshold">Quality Threshold:</label>
+                        <input type="number" id="qualityThreshold" value="80" min="0" max="100">
+                    </div>
+                    <div class="option-group">
+                        <label for="maxAttempts">Max Attempts:</label>
+                        <input type="number" id="maxAttempts" value="10" min="1" max="20">
+                    </div>
+                    <div class="option-group">
+                        <label for="carbonConstraint">Max Carbon (gCO2/kWh):</label>
+                        <input type="number" id="carbonConstraint" value="250" min="0" max="500">
+                    </div>
+                    <div class="option-group">
+                        <label for="latencyConstraint">Max Latency (ms):</label>
+                        <input type="number" id="latencyConstraint" value="200" min="0" max="1000">
+                    </div>
+                </div>
+                
+                <button class="execute-btn" onclick="executeRequest()">
+                    Execute Through Stack
+                </button>
+                
+                <div id="result" class="result-section" style="display: none;">
+                    <h3>Result</h3>
+                    <div id="resultContent"></div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <h2>System Metrics</h2>
+                
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-value" id="totalDecisions">0</div>
+                        <div class="metric-label">Total Decisions</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="avgFractureScore">0</div>
+                        <div class="metric-label">Avg Fracture Score</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="convergenceRate">0%</div>
+                        <div class="metric-label">Convergence Rate</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-value" id="carbonSaved">0g</div>
+                        <div class="metric-label">Carbon Saved</div>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 30px;">
+                    <h3>Tier Distribution</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px;">
+                        <div class="metric-card">
+                            <div class="metric-value" id="tier0Percent" style="color: #4caf50;">0%</div>
+                            <div class="metric-label">Tier 0 (Routine)</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="tier1Percent" style="color: #ff9800;">0%</div>
+                            <div class="metric-label">Tier 1 (Elevated)</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="tier2Percent" style="color: #f44336;">0%</div>
+                            <div class="metric-label">Tier 2 (Full Stack)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="decision-log">
+            <h2>Recent Decisions</h2>
+            <div id="decisionLog">
+                <p style="color: #999; text-align: center; padding: 40px;">No decisions yet. Execute a request to see the log.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock API endpoints
+        const API_BASE = 'http://localhost:3000/api';
+        
+        // Initialize demo data
+        let mockDecisions = [];
+        let mockMetrics = {
+            totalDecisions: 0,
+            tierDistribution: { tier0: 0, tier1: 0, tier2: 0 },
+            avgFractureScore: 0,
+            avgDetrimentalScore: 0,
+            avgDriftMagnitude: 0,
+            convergenceRate: 0,
+            totalCarbonSaved: 0
+        };
+        
+        // Execute request through the stack
+        async function executeRequest() {
+            const request = document.getElementById('request').value;
+            const qualityThreshold = parseInt(document.getElementById('qualityThreshold').value);
+            const maxAttempts = parseInt(document.getElementById('maxAttempts').value);
+            const carbonConstraint = parseInt(document.getElementById('carbonConstraint').value);
+            const latencyConstraint = parseInt(document.getElementById('latencyConstraint').value);
+            
+            const button = document.querySelector('.execute-btn');
+            const resultDiv = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+            
+            // Show loading state
+            button.disabled = true;
+            button.innerHTML = '<span class="loading"></span> Processing...';
+            resultDiv.style.display = 'none';
+            
+            try {
+                // Simulate API call with mock data
+                await simulateAPICall(request, {
+                    qualityThreshold,
+                    maxAttempts,
+                    carbonConstraint,
+                    latencyConstraint
+                });
+                
+                // Show success result
+                resultContent.innerHTML = `
+                    <div class="success">
+                        <strong>✅ Request processed successfully</strong><br>
+                        Generated comprehensive business strategy with 5 key initiatives
+                    </div>
+                    <div style="margin-top: 15px;">
+                        <strong>Execution Details:</strong><br>
+                        Region: us-west-1 (Lowest carbon intensity)<br>
+                        Convergence: Achieved in 2 attempts<br>
+                        Quality Score: 92/100
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+                
+            } catch (error) {
+                // Show error result
+                resultContent.innerHTML = `
+                    <div class="error">
+                        <strong>❌ Request failed</strong><br>
+                        ${error.message}
+                    </div>
+                `;
+                resultDiv.style.display = 'block';
+            } finally {
+                // Reset button
+                button.disabled = false;
+                button.textContent = 'Execute Through Stack';
+            }
+        }
+        
+        // Simulate API call with realistic delays and responses
+        function simulateAPICall(request, options) {
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    // Generate mock decision data
+                    const tier = Math.random() < 0.7 ? 0 : Math.random() < 0.9 ? 1 : 2;
+                    const fractureScore = Math.random() * 50;
+                    const detrimentalScore = Math.random() * 30;
+                    const driftMagnitude = Math.random() * 20;
+                    const converged = Math.random() > 0.05;
+                    const qualityScore = 70 + Math.random() * 30;
+                    const convergenceDepth = Math.floor(Math.random() * 5) + 1;
+                    const carbonIntensity = 80 + Math.random() * 150;
+                    const latency = 30 + Math.random() * 100;
+                    const cost = 0.05 + Math.random() * 0.1;
+                    const carbonSaved = Math.max(0, 300 - carbonIntensity);
+                    
+                    const decision = {
+                        id: 'decision_' + Date.now(),
+                        timestamp: new Date().toISOString(),
+                        request: request.substring(0, 50) + '...',
+                        tier,
+                        fractureScore: fractureScore.toFixed(1),
+                        detrimentalScore: detrimentalScore.toFixed(1),
+                        driftMagnitude: driftMagnitude.toFixed(1),
+                        approved: tier < 2 || (tier === 2 && Math.random() > 0.3),
+                        converged,
+                        qualityScore: qualityScore.toFixed(1),
+                        convergenceDepth,
+                        executionRegion: carbonIntensity < 150 ? 'us-west-1' : carbonIntensity < 200 ? 'us-east-1' : 'eu-west-1',
+                        carbonIntensity: carbonIntensity.toFixed(0),
+                        latency: latency.toFixed(0),
+                        cost: cost.toFixed(3),
+                        carbonSaved: carbonSaved.toFixed(0)
+                    };
+                    
+                    // Add to decisions log
+                    mockDecisions.unshift(decision);
+                    if (mockDecisions.length > 10) mockDecisions.pop();
+                    
+                    // Update metrics
+                    mockMetrics.totalDecisions++;
+                    mockMetrics.tierDistribution['tier' + tier]++;
+                    mockMetrics.avgFractureScore = (mockMetrics.avgFractureScore * (mockMetrics.totalDecisions - 1) + fractureScore) / mockMetrics.totalDecisions;
+                    mockMetrics.convergenceRate = ((mockMetrics.convergenceRate * (mockMetrics.totalDecisions - 1)) + (converged ? 100 : 0)) / mockMetrics.totalDecisions;
+                    mockMetrics.totalCarbonSaved += carbonSaved;
+                    
+                    // Update UI
+                    updateMetrics();
+                    updateDecisionLog();
+                    
+                    if (!decision.approved) {
+                        reject(new Error('Request blocked by Seked governance: High risk detected'));
+                    } else if (!converged) {
+                        reject(new Error('Failed to converge after ' + options.maxAttempts + ' attempts'));
+                    } else {
+                        resolve(decision);
+                    }
+                }, 1500 + Math.random() * 1000); // Simulate processing time
+            });
+        }
+        
+        // Update metrics display
+        function updateMetrics() {
+            document.getElementById('totalDecisions').textContent = mockMetrics.totalDecisions;
+            document.getElementById('avgFractureScore').textContent = mockMetrics.avgFractureScore.toFixed(1);
+            document.getElementById('convergenceRate').textContent = mockMetrics.convergenceRate.toFixed(1) + '%';
+            document.getElementById('carbonSaved').textContent = mockMetrics.totalCarbonSaved.toFixed(0) + 'g';
+            
+            const total = mockMetrics.totalDecisions || 1;
+            document.getElementById('tier0Percent').textContent = ((mockMetrics.tierDistribution.tier0 / total) * 100).toFixed(1) + '%';
+            document.getElementById('tier1Percent').textContent = ((mockMetrics.tierDistribution.tier1 / total) * 100).toFixed(1) + '%';
+            document.getElementById('tier2Percent').textContent = ((mockMetrics.tierDistribution.tier2 / total) * 100).toFixed(1) + '%';
+        }
+        
+        // Update decision log display
+        function updateDecisionLog() {
+            const logContainer = document.getElementById('decisionLog');
+            
+            if (mockDecisions.length === 0) {
+                logContainer.innerHTML = '<p style="color: #999; text-align: center; padding: 40px;">No decisions yet. Execute a request to see the log.</p>';
+                return;
+            }
+            
+            logContainer.innerHTML = mockDecisions.map(decision => `
+                <div class="log-entry tier-${decision.tier}">
+                    <h4>${decision.request}</h4>
+                    <div class="timestamp">${new Date(decision.timestamp).toLocaleString()}</div>
+                    <div class="details">
+                        <div class="detail-item">
+                            <span class="detail-label">Tier:</span>
+                            <span class="detail-value">${decision.tier}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Fracture:</span>
+                            <span class="detail-value">${decision.fractureScore}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Detrimental:</span>
+                            <span class="detail-value">${decision.detrimentalScore}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Quality:</span>
+                            <span class="detail-value">${decision.qualityScore}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Region:</span>
+                            <span class="detail-value">${decision.executionRegion}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">Carbon:</span>
+                            <span class="detail-value">${decision.carbonIntensity} gCO2/kWh</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Load initial metrics on page load
+        window.addEventListener('load', () => {
+            updateMetrics();
+        });
+    </script>
+</body>
+</html>
