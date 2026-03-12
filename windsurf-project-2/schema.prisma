@@ -1,0 +1,106 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./seked_stack.db"
+}
+
+model Decision {
+  id                String   @id @default(cuid())
+  timestamp         DateTime @default(now())
+  
+  // Core Tracking
+  app_id            String   // "seked-stack"
+  run_id            String   // unique per execution
+  input_type        String   // "user_request", "api_call", etc.
+  output_type       String   // "text", "json", "action", etc.
+  action_taken      String   // description of what was done
+  success           Boolean
+  duration          Float    // milliseconds
+  notes             String?
+  
+  // Layer 1: Seked Governance
+  tier              Int      // 0, 1, or 2
+  fractureScore     Float
+  detrimentalScore  Float
+  driftMagnitude    Float
+  approved          Boolean
+  shadowIntent      String?  // inferred intent vector
+  
+  // Layer 2: ConvergeOS
+  convergenceDepth  Int      // number of retry attempts
+  qualityScore      Float
+  schemaCompliant   Boolean
+  converged         Boolean
+  convergenceError  String?
+  
+  // Layer 3: ECOBE
+  executionRegion   String?
+  carbonIntensity   Float?
+  latency           Float?
+  executionCost     Float?
+  
+  // Unified Metrics
+  endToEndLatency   Float?
+  totalCost         Float?
+  carbonSaved       Float?
+}
+
+model SignalField {
+  id                String   @id @default(cuid())
+  timestamp         DateTime @default(now())
+  
+  // Reference Stars (protected invariants)
+  referenceStars    String   // JSON array of protected constraints
+  
+  // Intent Vectors
+  intentVectors     String   // JSON array of {direction, magnitude, source}
+  
+  // Trust Weights
+  trustWeights      String   // JSON object of {source: weight}
+  
+  // Fracture Map
+  fractureMap       String   // JSON array of conflict points
+  
+  // Drift Ledger
+  driftLedger       String   // JSON array of drift events
+  
+  // Smoke-Relay Summaries
+  smokeRelay        String   // JSON array of continuity packets
+}
+
+model EcobeRegion {
+  id                String   @id @default(cuid())
+  timestamp         DateTime @default(now())
+  
+  region            String   @unique
+  carbonIntensity   Float
+  latency           Float
+  cost              Float
+  available         Boolean  @default(true)
+}
+
+model CollapseEvent {
+  id                String   @id @default(cuid())
+  timestamp         DateTime @default(now())
+  
+  pattern           String   // "overreach", "fragmentation", "verification_failure"
+  severity          Float    // 0-100
+  description       String
+  mitigationTaken   String?
+  resolved          Boolean  @default(false)
+  decisionId        String?  // Link to Decision if applicable
+}
+
+model WatchtowerLog {
+  id                String   @id @default(cuid())
+  timestamp         DateTime @default(now())
+  
+  consensusType     String   // "smoke_relay", "reference_star", "threshold"
+  consensusScore    Float    // 0-100
+  participants      String   // JSON array of validator IDs
+  outcome           String   // "approved", "rejected", "escalated"
+  details           String   // JSON object with full context
+}
