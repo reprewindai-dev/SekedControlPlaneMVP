@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate required secrets
         shell: powershell
@@ -116,28 +116,28 @@ jobs:
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload Ollama benchmark artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ollama-provider-refresh-benchmark
           path: ${{ steps.benchmark.outputs.artifact-dir }}
           if-no-files-found: error
 
       - name: Upload baseline bootstrap artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ollama-provider-refresh-bootstrap
           path: ${{ steps.bootstrap.outputs.artifact-dir }}
           if-no-files-found: error
 
       - name: Upload synthetic run artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ollama-provider-refresh-run
           path: ${{ steps.synthetic.outputs.artifact-dir }}
           if-no-files-found: error
 
       - name: Upload provider analytics artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ollama-provider-refresh-observe
           path: ${{ steps.observe.outputs.artifact-dir }}

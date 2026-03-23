@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate required secrets
         shell: powershell
@@ -96,14 +96,14 @@ jobs:
           "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload synthetic run artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: seked-control-plane-synthetic-run
           path: ${{ steps.run.outputs.artifact-dir }}
           if-no-files-found: error
 
       - name: Upload refreshed telemetry artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: seked-control-plane-refresh-observe
           path: ${{ steps.observe.outputs.artifact-dir }}
