@@ -2,6 +2,7 @@ import { prisma } from '../lib/prisma';
 import { evaluateSeked, SekedInput, SekedResult } from './seked';
 import { runConvergence, ConvergeOSInput, ConvergeOSResult } from './convergeos';
 import { routeEcobe, EcobeInput, EcobeResult, recordRoutingObservation } from './ecobe';
+import { env } from '../config/env';
 
 export async function executeThreePlanePipeline(runId: string, payload: any) {
   const pipelineStartedAt = Date.now();
@@ -37,29 +38,10 @@ export async function executeThreePlanePipeline(runId: string, payload: any) {
       },
     });
 
-    // 2) ConvergeOS Reliability Plane
-    const convergeInput: ConvergeOSInput = {
-      runId,
-      sekedResult,
-      task: payload.task,
-      inputs: payload.inputs,
-      schemaId: payload.schema_id,
-      policyConfig: policy,
-    };
-    const convergeResult = await runConvergence(convergeInput);
-
-    await prisma.runEvent.create({
-      data: {
-        runId,
-        type: convergeResult.converged ? 'CONVERGE_PASSED' : 'CONVERGE_FAILED',
-        data: convergeResult as any,
-      },
-    });
-
-    // 3) ECOBE Infrastructure Plane
+    // 2) ECOBE Infrastructure Plane
     const ecobeInput: EcobeInput = {
       runId,
-      convergeResult,
+      convergeResult: { converged: true },
       policyConfig: policy,
       execution: payload.execution,
       constraints: payload.constraints,
@@ -73,6 +55,45 @@ export async function executeThreePlanePipeline(runId: string, payload: any) {
         data: ecobeResult as any,
       },
     });
+
+    // 3) ConvergeOS Reliability Plane
+    const convergeInput: ConvergeOSInput = {
+      runId,
+      sekedResult,
+      task: payload.task,
+      inputs: payload.inputs,
+      schemaId: payload.schema_id,
+      policyConfig: policy,
+      execution: {
+        primaryProvider: ecobeResult.provider,
+        region: ecobeResult.region,
+      },
+    };
+    const convergeResult = await runConvergence(convergeInput);
+
+    await prisma.runEvent.create({
+      data: {
+        runId,
+        type: convergeResult.converged ? 'CONVERGE_PASSED' : 'CONVERGE_FAILED',
+        data: convergeResult as any,
+      },
+    });
+
+    if (convergeResult.providerUsed && convergeResult.providerUsed !== ecobeResult.provider) {
+      await prisma.runEvent.create({
+        data: {
+          runId,
+          type: 'PROVIDER_FALLBACK_USED',
+          data: {
+            routedProvider: ecobeResult.provider,
+            routedRegion: ecobeResult.region,
+            executedProvider: convergeResult.providerUsed,
+            executedRegion: convergeResult.regionUsed,
+            providerAttempts: convergeResult.providerAttempts ?? [],
+          } as any,
+        },
+      });
+    }
 
     // Finalize run
     const finalOutput = convergeResult.converged ? convergeResult.finalOutput : null;
@@ -92,11 +113,17 @@ export async function executeThreePlanePipeline(runId: string, payload: any) {
         errorCount: Array.isArray(convergeResult.errors) ? convergeResult.errors.length : convergeResult.errors ? 1 : 0,
       },
       infrastructure: {
-        provider: ecobeResult.provider,
-        region: ecobeResult.region,
+        routedProvider: ecobeResult.provider,
+        routedRegion: ecobeResult.region,
+        executedProvider: convergeResult.providerUsed ?? ecobeResult.provider,
+        executedRegion: convergeResult.regionUsed ?? ecobeResult.region,
         estimatedCostUsd: ecobeResult.estimatedCostUsd,
         estimatedLatencyMs: ecobeResult.estimatedLatencyMs,
+        executionCostUsd: convergeResult.executionCostUsd ?? ecobeResult.estimatedCostUsd,
+        executionLatencyMs: convergeResult.executionLatencyMs ?? ecobeResult.estimatedLatencyMs,
         carbonIntensityGco2Kwh: ecobeResult.carbonIntensityGco2Kwh,
+        fallbackTriggered:
+          Boolean(convergeResult.providerUsed) && convergeResult.providerUsed !== ecobeResult.provider,
       },
       outcome: {
         status: finalStatus,
@@ -125,10 +152,16 @@ export async function executeThreePlanePipeline(runId: string, payload: any) {
 
     await recordRoutingObservation({
       orgId: payload.orgId,
-      provider: ecobeResult.provider,
-      region: ecobeResult.region,
-      observedLatencyMs: Math.max(1, Date.now() - pipelineStartedAt),
-      observedCostUsd: ecobeResult.estimatedCostUsd,
+      provider: convergeResult.providerUsed ?? ecobeResult.provider,
+      region:
+        convergeResult.regionUsed ??
+        (convergeResult.providerUsed === 'groq'
+          ? env.groqProviderRegion
+          : convergeResult.providerUsed === 'ollama'
+            ? env.ollamaProviderRegion
+            : ecobeResult.region),
+      observedLatencyMs: Math.max(1, convergeResult.executionLatencyMs ?? Date.now() - pipelineStartedAt),
+      observedCostUsd: convergeResult.executionCostUsd ?? ecobeResult.estimatedCostUsd,
       observedCarbonIntensityGco2Kwh: ecobeResult.carbonIntensityGco2Kwh,
       observedAt: new Date(),
     });

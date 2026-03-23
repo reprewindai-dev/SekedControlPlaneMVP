@@ -16,4 +16,11 @@ export const env = {
   stripeSecretKey: required('STRIPE_SECRET_KEY'),
   stripeWebhookSecret: required('STRIPE_WEBHOOK_SECRET'),
   adminApiKey: required('ADMIN_API_KEY'),
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+  ollamaModel: process.env.OLLAMA_MODEL ?? 'qwen2.5:1.5b',
+  ollamaProviderRegion: process.env.OLLAMA_PROVIDER_REGION ?? 'local',
+  groqApiKey: process.env.GROQ_API_KEY ?? '',
+  groqBaseUrl: process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1',
+  groqModel: process.env.GROQ_MODEL ?? 'llama-3.1-8b-instant',
+  groqProviderRegion: process.env.GROQ_PROVIDER_REGION ?? 'groq-cloud',
 };

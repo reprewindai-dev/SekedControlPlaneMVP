@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { executeProviderSynthesis, ProviderAttempt } from './provider-executor';
 
 type JsonSchema = {
   type?: string;
@@ -28,6 +29,10 @@ export interface ConvergeOSInput {
   inputs: any;
   schemaId: string;
   policyConfig: any;
+  execution?: {
+    primaryProvider?: string;
+    region?: string;
+  };
 }
 
 export interface ConvergeOSResult {
@@ -36,6 +41,11 @@ export interface ConvergeOSResult {
   finalQualityScore?: number;
   attemptsUsed: number;
   errors?: ValidationIssue[];
+  providerUsed?: string;
+  regionUsed?: string;
+  providerAttempts?: ProviderAttempt[];
+  executionLatencyMs?: number;
+  executionCostUsd?: number;
 }
 
 type SynthesisContext = {
@@ -67,17 +77,56 @@ export async function runConvergence(input: ConvergeOSInput): Promise<ConvergeOS
   let lastIssues: ValidationIssue[] = [];
   let lastQualityScore = 0;
   let attemptsUsed = 0;
+  const providerAttempts: ProviderAttempt[] = [];
+  let providerUsed: string | undefined;
+  let regionUsed: string | undefined;
+  let executionLatencyMs = 0;
+  let executionCostUsd = 0;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     attemptsUsed = attempt;
 
-    const rawOutput = synthesizeFromSchema(schema, {
+    const synthesisContext = {
       runId: input.runId,
       task: input.task,
       inputs: input.inputs,
       attempt,
       priorIssues: lastIssues,
-    });
+    };
+
+    let rawOutput: any;
+    try {
+      const providerResult = await executeProviderSynthesis({
+        schema,
+        task: input.task,
+        inputs: input.inputs,
+        runId: input.runId,
+        attempt,
+        priorIssues: lastIssues,
+        preferredProvider: input.execution?.primaryProvider,
+      });
+
+      if (providerResult) {
+        rawOutput = providerResult.output;
+        providerUsed = providerResult.provider;
+        regionUsed = providerResult.region;
+        executionLatencyMs = providerResult.latencyMs;
+        executionCostUsd = providerResult.estimatedCostUsd;
+        providerAttempts.push(...providerResult.attempts);
+      } else {
+        rawOutput = synthesizeFromSchema(schema, synthesisContext);
+      }
+    } catch (error) {
+      rawOutput = synthesizeFromSchema(schema, synthesisContext);
+      providerAttempts.push({
+        provider: input.execution?.primaryProvider ?? 'unconfigured',
+        region: input.execution?.region ?? 'unknown',
+        success: false,
+        latencyMs: 0,
+        estimatedCostUsd: 0,
+        error: error instanceof Error ? error.message : 'Unknown provider failure',
+      });
+    }
     const issues = validateAgainstSchema(rawOutput, schema);
     const schemaValid = issues.length === 0;
     const qualityScore = computeQualityScore(rawOutput, schema, input.inputs, attempt, issues);
@@ -111,6 +160,11 @@ export async function runConvergence(input: ConvergeOSInput): Promise<ConvergeOS
         finalOutput: rawOutput,
         finalQualityScore: qualityScore,
         attemptsUsed,
+        providerUsed,
+        regionUsed,
+        providerAttempts,
+        executionLatencyMs,
+        executionCostUsd,
       };
     }
 
@@ -131,6 +185,11 @@ export async function runConvergence(input: ConvergeOSInput): Promise<ConvergeOS
     converged: false,
     attemptsUsed,
     errors: lastIssues,
+    providerUsed,
+    regionUsed,
+    providerAttempts,
+    executionLatencyMs,
+    executionCostUsd,
   };
 }
 
