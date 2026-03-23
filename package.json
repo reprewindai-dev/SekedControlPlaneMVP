@@ -8,8 +8,8 @@
     "build": "tsc --project tsconfig.json",
     "start": "node dist/server.js",
     "start:prod": "NODE_ENV=production node dist/server.js",
-    "prisma:generate": "prisma generate --schema=schema.prisma",
-    "prisma:migrate": "prisma migrate deploy --schema=schema.prisma",
+    "prisma:generate": "prisma generate --schema=_archived/schema.prisma",
+    "prisma:migrate": "prisma migrate deploy --schema=_archived/schema.prisma",
     "lint": "eslint src --ext .ts",
     "test": "jest"
   },
