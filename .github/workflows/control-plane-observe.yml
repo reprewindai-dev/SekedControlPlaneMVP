@@ -1,0 +1,57 @@
+name: Control Plane Observe
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */4 * * *'
+
+jobs:
+  observe:
+    if: ${{ secrets.SEKED_CONTROL_PLANE_URL != '' && secrets.SEKED_CONTROL_PLANE_API_KEY != '' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect control plane telemetry
+        id: observe
+        uses: ./.github/actions/control-plane-observer
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          analytics-limit: '50'
+          usage-days: '30'
+          provider-days: '30'
+
+      - name: Assert healthy control plane
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.observe.outputs.health-status }}" != "ok" ]]; then
+            echo "Control plane health check failed: ${{ steps.observe.outputs.health-status }}" >&2
+            exit 1
+          fi
+
+      - name: Publish summary
+        shell: bash
+        run: |
+          {
+            echo "## Seked Control Plane Observe"
+            echo ""
+            echo "- Health: \`${{ steps.observe.outputs.health-status }}\`"
+            echo "- Runs: \`${{ steps.observe.outputs.total-runs }}\`"
+            echo "- Completed: \`${{ steps.observe.outputs.completed-runs }}\`"
+            echo "- Failed: \`${{ steps.observe.outputs.failed-runs }}\`"
+            echo "- Avg quality score: \`${{ steps.observe.outputs.avg-quality-score }}\`"
+            echo "- Avg routing latency (ms): \`${{ steps.observe.outputs.avg-routing-latency-ms }}\`"
+            echo "- Avg routing cost (USD): \`${{ steps.observe.outputs.avg-routing-cost-usd }}\`"
+            echo "- Providers tracked: \`${{ steps.observe.outputs.provider-count }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload telemetry artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: seked-control-plane-observe
+          path: ${{ steps.observe.outputs.artifact-dir }}
+          if-no-files-found: error

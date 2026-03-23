@@ -1,0 +1,96 @@
+name: 'Seked Control Plane Observer'
+description: 'Collect live health, usage, analytics summary, and provider baseline data from the deployed Seked control plane'
+
+inputs:
+  base-url:
+    description: 'Deployed Seked control plane base URL'
+    required: true
+  api-key:
+    description: 'Bearer API key for the Seked control plane'
+    required: true
+  analytics-limit:
+    description: 'Number of recent runs to include in analytics summary'
+    required: false
+    default: '50'
+  usage-days:
+    description: 'Trailing window in days for usage aggregation'
+    required: false
+    default: '30'
+  provider-days:
+    description: 'Trailing window in days for provider baseline analytics'
+    required: false
+    default: '30'
+
+outputs:
+  health-status:
+    description: 'Health status returned by the control plane'
+    value: ${{ steps.observe.outputs.health-status }}
+  total-runs:
+    description: 'Total runs in analytics summary window'
+    value: ${{ steps.observe.outputs.total-runs }}
+  completed-runs:
+    description: 'Completed runs in analytics summary window'
+    value: ${{ steps.observe.outputs.completed-runs }}
+  failed-runs:
+    description: 'Failed runs in analytics summary window'
+    value: ${{ steps.observe.outputs.failed-runs }}
+  avg-quality-score:
+    description: 'Average quality score across completed runs'
+    value: ${{ steps.observe.outputs.avg-quality-score }}
+  avg-routing-latency-ms:
+    description: 'Average routing latency in milliseconds'
+    value: ${{ steps.observe.outputs.avg-routing-latency-ms }}
+  avg-routing-cost-usd:
+    description: 'Average routing cost in USD'
+    value: ${{ steps.observe.outputs.avg-routing-cost-usd }}
+  provider-count:
+    description: 'Number of providers in provider analytics output'
+    value: ${{ steps.observe.outputs.provider-count }}
+  artifact-dir:
+    description: 'Directory containing the collected JSON payloads'
+    value: ${{ steps.observe.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: observe
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        base_url="${{ inputs.base-url }}"
+        base_url="${base_url%/}"
+        auth_header="Authorization: Bearer ${{ inputs.api-key }}"
+        artifact_dir="$RUNNER_TEMP/seked-control-plane-observer"
+        mkdir -p "$artifact_dir"
+
+        usage_from="$(date -u -d "${{ inputs.usage-days }} days ago" +%Y-%m-%dT%H:%M:%SZ)"
+
+        curl --fail-with-body --silent --show-error \
+          "${base_url}/health" \
+          > "${artifact_dir}/health.json"
+
+        curl --fail-with-body --silent --show-error \
+          -H "${auth_header}" \
+          "${base_url}/runs/analytics/summary?limit=${{ inputs.analytics-limit }}" \
+          > "${artifact_dir}/analytics-summary.json"
+
+        curl --fail-with-body --silent --show-error \
+          -H "${auth_header}" \
+          "${base_url}/usage?from=${usage_from}" \
+          > "${artifact_dir}/usage.json"
+
+        curl --fail-with-body --silent --show-error \
+          -H "${auth_header}" \
+          "${base_url}/runs/analytics/providers?days=${{ inputs.provider-days }}" \
+          > "${artifact_dir}/provider-analytics.json"
+
+        echo "health-status=$(jq -r '.status // "unknown"' "${artifact_dir}/health.json")" >> "$GITHUB_OUTPUT"
+        echo "total-runs=$(jq -r '.totals.runs // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
+        echo "completed-runs=$(jq -r '.totals.completed // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
+        echo "failed-runs=$(jq -r '.totals.failed // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
+        echo "avg-quality-score=$(jq -r '.averages.qualityScore // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
+        echo "avg-routing-latency-ms=$(jq -r '.averages.routingLatencyMs // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
+        echo "avg-routing-cost-usd=$(jq -r '.averages.routingCostUsd // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
+        echo "provider-count=$(jq -r '.totals.providers // 0' "${artifact_dir}/provider-analytics.json")" >> "$GITHUB_OUTPUT"
+        echo "artifact-dir=${artifact_dir}" >> "$GITHUB_OUTPUT"

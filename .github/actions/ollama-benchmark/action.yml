@@ -1,0 +1,124 @@
+name: 'Ollama Benchmark'
+description: 'Run a direct benchmark against a local Ollama endpoint from a self-hosted runner'
+
+inputs:
+  ollama-base-url:
+    description: 'Local Ollama base URL'
+    required: false
+    default: 'http://127.0.0.1:11434'
+  model:
+    description: 'Ollama model name to benchmark'
+    required: true
+  prompt:
+    description: 'Prompt sent to the model'
+    required: false
+    default: 'Return a compact JSON object with keys summary and risk. Summary should describe carbon-aware routing in one sentence. Risk should be low, medium, or high.'
+  timeout-seconds:
+    description: 'Request timeout in seconds'
+    required: false
+    default: '180'
+
+outputs:
+  model:
+    description: 'Benchmarked model'
+    value: ${{ steps.benchmark.outputs.model }}
+  total-duration-ms:
+    description: 'Total generation duration in milliseconds'
+    value: ${{ steps.benchmark.outputs.total-duration-ms }}
+  eval-count:
+    description: 'Generated token count'
+    value: ${{ steps.benchmark.outputs.eval-count }}
+  eval-duration-ms:
+    description: 'Token generation duration in milliseconds'
+    value: ${{ steps.benchmark.outputs.eval-duration-ms }}
+  prompt-eval-count:
+    description: 'Prompt token count'
+    value: ${{ steps.benchmark.outputs.prompt-eval-count }}
+  prompt-eval-duration-ms:
+    description: 'Prompt evaluation duration in milliseconds'
+    value: ${{ steps.benchmark.outputs.prompt-eval-duration-ms }}
+  tokens-per-second:
+    description: 'Generated tokens per second'
+    value: ${{ steps.benchmark.outputs.tokens-per-second }}
+  response-chars:
+    description: 'Response character count'
+    value: ${{ steps.benchmark.outputs.response-chars }}
+  artifact-dir:
+    description: 'Directory with raw benchmark payloads'
+    value: ${{ steps.benchmark.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: benchmark
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+
+        $baseUrl = '${{ inputs.ollama-base-url }}'.TrimEnd('/')
+        $model = '${{ inputs.model }}'
+        $prompt = @'
+${{ inputs.prompt }}
+'@
+        $timeoutSeconds = [int]'${{ inputs.timeout-seconds }}'
+
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'ollama-benchmark'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+        $tagsResponse = Invoke-RestMethod -Method Get -Uri "$baseUrl/api/tags" -TimeoutSec $timeoutSeconds
+        $tagsPath = Join-Path $artifactDir 'tags.json'
+        $tagsResponse | ConvertTo-Json -Depth 100 | Set-Content -Path $tagsPath -Encoding utf8
+
+        $availableModels = @()
+        if ($tagsResponse.models) {
+          $availableModels = @($tagsResponse.models | ForEach-Object { $_.name })
+        }
+        if (-not ($availableModels -contains $model)) {
+          throw "Model '$model' is not available on the local Ollama instance. Available models: $($availableModels -join ', ')"
+        }
+
+        $payload = @{
+          model = $model
+          prompt = $prompt
+          stream = $false
+          options = @{
+            temperature = 0
+          }
+        }
+
+        $payloadPath = Join-Path $artifactDir 'payload.json'
+        $payload | ConvertTo-Json -Depth 20 | Set-Content -Path $payloadPath -Encoding utf8
+
+        $wallStart = Get-Date
+        $response = Invoke-RestMethod `
+          -Method Post `
+          -Uri "$baseUrl/api/generate" `
+          -ContentType 'application/json' `
+          -Body ($payload | ConvertTo-Json -Depth 20 -Compress) `
+          -TimeoutSec $timeoutSeconds
+        $wallEnd = Get-Date
+
+        $responsePath = Join-Path $artifactDir 'response.json'
+        $response | ConvertTo-Json -Depth 100 | Set-Content -Path $responsePath -Encoding utf8
+
+        $wallDurationMs = [math]::Round((New-TimeSpan -Start $wallStart -End $wallEnd).TotalMilliseconds, 2)
+        $evalCount = if ($null -ne $response.eval_count) { [double]$response.eval_count } else { 0 }
+        $evalDurationNs = if ($null -ne $response.eval_duration) { [double]$response.eval_duration } else { 0 }
+        $promptEvalCount = if ($null -ne $response.prompt_eval_count) { [double]$response.prompt_eval_count } else { 0 }
+        $promptEvalDurationNs = if ($null -ne $response.prompt_eval_duration) { [double]$response.prompt_eval_duration } else { 0 }
+        $totalDurationNs = if ($null -ne $response.total_duration) { [double]$response.total_duration } else { 0 }
+        $totalDurationMs = if ($totalDurationNs -gt 0) { [math]::Round($totalDurationNs / 1000000, 2) } else { $wallDurationMs }
+        $evalDurationMs = if ($evalDurationNs -gt 0) { [math]::Round($evalDurationNs / 1000000, 2) } else { 0 }
+        $promptEvalDurationMs = if ($promptEvalDurationNs -gt 0) { [math]::Round($promptEvalDurationNs / 1000000, 2) } else { 0 }
+        $tokensPerSecond = if ($evalDurationNs -gt 0 -and $evalCount -gt 0) { [math]::Round($evalCount / ($evalDurationNs / 1000000000), 2) } else { 0 }
+        $responseChars = if ($null -ne $response.response) { $response.response.Length } else { 0 }
+
+        "model=$model" >> $env:GITHUB_OUTPUT
+        "total-duration-ms=$totalDurationMs" >> $env:GITHUB_OUTPUT
+        "eval-count=$evalCount" >> $env:GITHUB_OUTPUT
+        "eval-duration-ms=$evalDurationMs" >> $env:GITHUB_OUTPUT
+        "prompt-eval-count=$promptEvalCount" >> $env:GITHUB_OUTPUT
+        "prompt-eval-duration-ms=$promptEvalDurationMs" >> $env:GITHUB_OUTPUT
+        "tokens-per-second=$tokensPerSecond" >> $env:GITHUB_OUTPUT
+        "response-chars=$responseChars" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT

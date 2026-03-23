@@ -1,112 +1,383 @@
-// schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./seked_stack.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-model Decision {
-  id                String   @id @default(cuid())
-  timestamp         DateTime @default(now())
-  
-  // Core Tracking
-  app_id            String   // "seked-stack"
-  run_id            String   // unique per execution
-  input_type        String   // "user_request", "api_call", etc.
-  output_type       String   // "text", "json", "action", etc.
-  action_taken      String   // description of what was done
-  success           Boolean
-  duration          Float    // milliseconds
-  notes             String?
-  
-  // Layer 1: Seked Governance
-  tier              Int      // 0, 1, or 2
-  fractureScore     Float
-  detrimentalScore  Float
-  driftMagnitude    Float
-  approved          Boolean
-  shadowIntent      String?  // inferred intent vector
-  
-  // Layer 2: ConvergeOS
-  convergenceDepth  Int      // number of retry attempts
-  qualityScore      Float
-  schemaCompliant   Boolean
-  converged         Boolean
-  convergenceError  String?
-  
-  // Layer 3: ECOBE
-  executionRegion   String?
-  carbonIntensity   Float?
-  latency           Float?
-  executionCost     Float?
-  
-  // Unified Metrics
-  endToEndLatency   Float?
-  totalCost         Float?
-  carbonSaved       Float?
+model Org {
+  id              String           @id @default(uuid())
+  name            String
+  plan            String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  apiKeys         ApiKey[]
+  billingAccounts BillingAccount[]
+  policies        Policy[]
+  schemas         Schema[]
+  projects        Project[]
+  routingPolicies RoutingPolicy[]
+  providerRegionBaselines ProviderRegionBaseline[]
+  runs            Run[]
+  usageRecords    UsageRecord[]
+  signalFields    SignalField[]
+  gridSamples     GridIntensitySample[]
+
+  @@map("orgs")
+}
+
+model Project {
+  id          String        @id @default(uuid())
+  orgId       String
+  name        String
+  environment String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  org         Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs        Run[]
+  signalFields SignalField[]
+
+  @@unique([orgId, name, environment])
+  @@index([orgId])
+  @@map("projects")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  orgId      String
+  name       String
+  hashedKey  String
+  role       String
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  org        Org       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("api_keys")
+}
+
+model BillingAccount {
+  id                String   @id @default(uuid())
+  orgId             String
+  status            String
+  billingEmail      String
+  paymentMethodJson Json?
+  customerRef       String?
+  subscriptionRef   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  org               Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+  @@map("billing_accounts")
+}
+
+model Policy {
+  id             String   @id @default(uuid())
+  orgId          String
+  name           String
+  sekedConfig    Json
+  convergeConfig Json
+  ecobeConfig    Json
+  version        Int      @default(1)
+  status         String   @default("draft")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  org            Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs           Run[]    @relation("RunPolicyProfile")
+
+  @@unique([orgId, name])
+  @@index([orgId, status])
+  @@map("policies")
+}
+
+model Schema {
+  id         String   @id @default(uuid())
+  orgId      String?
+  name       String   @default("default")
+  version    Int      @default(1)
+  jsonSchema Json
+  status     String   @default("active")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  org        Org?     @relation(fields: [orgId], references: [id], onDelete: SetNull)
+  runs       Run[]
+
+  @@index([orgId, status])
+  @@map("schemas")
+}
+
+model Run {
+  id                String           @id @default(uuid())
+  orgId             String
+  projectId         String
+  policyProfileId   String
+  schemaId          String
+  correlationId     String           @unique
+  policyVersion     Int
+  schemaVersion     Int
+  status            String
+  taskType          String?
+  riskLevel         String?
+  inputsJson        Json?
+  constraintsJson   Json?
+  executionJson     Json?
+  finalOutputJson   Json?
+  error             Json?
+  analyticsJson     Json?
+  createdAt         DateTime         @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  updatedAt         DateTime         @updatedAt
+  org               Org              @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project           Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  policyProfile     Policy           @relation("RunPolicyProfile", fields: [policyProfileId], references: [id], onDelete: Restrict)
+  schema            Schema           @relation(fields: [schemaId], references: [id], onDelete: Restrict)
+  events            RunEvent[]
+  usageRecords      UsageRecord[]
+  sekedScore        SekedScore?
+  convergenceRun    ConvergenceRun?
+  routingDecision   RoutingDecision?
+
+  @@index([orgId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([status, createdAt])
+  @@map("runs")
+}
+
+model RunEvent {
+  id        String   @id @default(uuid())
+  runId      String
+  type      String
+  data      Json
+  ts        DateTime @default(now())
+  run       Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, ts])
+  @@map("run_events")
+}
+
+model UsageRecord {
+  id        String   @id @default(uuid())
+  orgId     String
+  runId     String
+  quantity  Int
+  metric    String
+  unit      String
+  unitCost  Decimal  @db.Decimal(12, 6)
+  totalCost Decimal  @db.Decimal(12, 6)
+  timestamp DateTime @default(now())
+  org       Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  run       Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, timestamp])
+  @@index([runId, timestamp])
+  @@map("usage_records")
+}
+
+model ConvergenceRun {
+  id                String               @id @default(uuid())
+  runId             String               @unique
+  maxAttempts       Int
+  qualityThreshold  Float
+  attemptsUsed      Int                  @default(0)
+  converged         Boolean              @default(false)
+  finalQualityScore Float?
+  completedAt       DateTime?
+  createdAt         DateTime             @default(now())
+  run               Run                  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempts          ConvergenceAttempt[]
+
+  @@map("convergence_runs")
+}
+
+model ConvergenceAttempt {
+  id               String         @id @default(uuid())
+  convergenceRunId String
+  attemptIndex     Int
+  rawOutput        Json
+  schemaValid      Boolean
+  qualityScore     Float
+  errorsJson       Json?
+  patchedPrompt    String?
+  createdAt        DateTime       @default(now())
+  convergenceRun   ConvergenceRun @relation(fields: [convergenceRunId], references: [id], onDelete: Cascade)
+
+  @@unique([convergenceRunId, attemptIndex])
+  @@index([convergenceRunId, createdAt])
+  @@map("convergence_attempts")
+}
+
+model RoutingPolicy {
+  id          String   @id @default(uuid())
+  orgId       String
+  name        String   @default("default")
+  weightsJson Json
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  org         Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, active])
+  @@map("routing_policies")
+}
+
+model GridIntensitySample {
+  id                     String   @id @default(uuid())
+  orgId                  String?
+  region                 String
+  carbonIntensityGco2Kwh Float
+  source                 String?
+  validUntil             DateTime
+  ts                     DateTime @default(now())
+  org                    Org?     @relation(fields: [orgId], references: [id], onDelete: SetNull)
+
+  @@index([region, validUntil])
+  @@index([ts])
+  @@map("grid_intensity_samples")
+}
+
+model RoutingDecision {
+  id                     String   @id @default(uuid())
+  runId                  String   @unique
+  provider               String
+  region                 String
+  inputsJson             Json
+  estimatedCostUsd       Float
+  estimatedLatencyMs     Float
+  carbonIntensityGco2Kwh Float
+  decisionTraceJson      Json
+  createdAt              DateTime @default(now())
+  run                    Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([provider, region, createdAt])
+  @@map("routing_decisions")
+}
+
+model ProviderRegionBaseline {
+  id                           String   @id @default(uuid())
+  orgId                        String
+  provider                     String
+  region                       String
+  sampleCount                  Int      @default(0)
+  avgLatencyMs                 Float
+  avgCostUsd                   Float
+  avgCarbonIntensityGco2Kwh    Float
+  lastObservedAt               DateTime
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
+  org                          Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, provider, region])
+  @@index([orgId, provider, region])
+  @@index([orgId, lastObservedAt])
+  @@map("provider_region_baselines")
 }
 
 model SignalField {
-  id                String   @id @default(cuid())
-  timestamp         DateTime @default(now())
-  
-  // Reference Stars (protected invariants)
-  referenceStars    String   // JSON array of protected constraints
-  
-  // Intent Vectors
-  intentVectors     String   // JSON array of {direction, magnitude, source}
-  
-  // Trust Weights
-  trustWeights      String   // JSON object of {source: weight}
-  
-  // Fracture Map
-  fractureMap       String   // JSON array of conflict points
-  
-  // Drift Ledger
-  driftLedger       String   // JSON array of drift events
-  
-  // Smoke-Relay Summaries
-  smokeRelay        String   // JSON array of continuity packets
+  id              String         @id @default(uuid())
+  orgId           String
+  projectId       String?
+  scope           String
+  scopeId         String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  org             Org            @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project         Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  referenceStars  ReferenceStar[]
+  intentVectors   IntentVector[]
+  trustWeights    TrustWeight[]
+  driftLogEntries DriftLogEntry[]
+  fractureMaps    FractureMap[]
+
+  @@unique([orgId, scope, scopeId])
+  @@index([projectId])
+  @@map("signal_fields")
 }
 
-model EcobeRegion {
-  id                String   @id @default(cuid())
-  timestamp         DateTime @default(now())
-  
-  region            String   @unique
-  carbonIntensity   Float
-  latency           Float
-  cost              Float
-  available         Boolean  @default(true)
+model ReferenceStar {
+  id            String      @id @default(uuid())
+  signalFieldId String
+  label         String
+  payloadJson   Json?
+  createdAt     DateTime    @default(now())
+  signalField   SignalField @relation(fields: [signalFieldId], references: [id], onDelete: Cascade)
+
+  @@index([signalFieldId, createdAt])
+  @@map("reference_stars")
 }
 
-model CollapseEvent {
-  id                String   @id @default(cuid())
-  timestamp         DateTime @default(now())
-  
-  pattern           String   // "overexpansion", "corruption", etc.
-  severity          Float    // 0-100 score
-  description       String
-  mitigationTaken   String?
-  resolved          Boolean  @default(false)
-  decisionId        String?  @relation(fields: [decisionId], references: [id])
-  decision          Decision? @relation(fields: [decisionId], references: [id])
+model IntentVector {
+  id            String      @id @default(uuid())
+  signalFieldId String
+  label         String
+  directionJson Json
+  magnitude     Float
+  createdAt     DateTime    @default(now())
+  signalField   SignalField @relation(fields: [signalFieldId], references: [id], onDelete: Cascade)
+
+  @@index([signalFieldId, createdAt])
+  @@map("intent_vectors")
 }
 
-model WatchtowerLog {
-  id                String   @id @default(cuid())
-  timestamp         DateTime @default(now())
-  
-  nodeId            String   // which watchtower
-  validationType    String   // "cross_check", "consensus", etc.
-  inputSignal       String   // what was validated
-  validationResult   Boolean  // passed/failed
-  consensusScore    Float?   // if consensus validation
-  details           String?   // additional context
-  decisionId        String?  @relation(fields: [decisionId], references: [id])
-  decision          Decision? @relation(fields: [decisionId], references: [id])
+model TrustWeight {
+  id            String      @id @default(uuid())
+  signalFieldId String
+  sourceType    String
+  sourceId      String
+  weight        Float
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  signalField   SignalField @relation(fields: [signalFieldId], references: [id], onDelete: Cascade)
+
+  @@unique([signalFieldId, sourceType, sourceId])
+  @@index([signalFieldId, weight])
+  @@map("trust_weights")
+}
+
+model DriftLogEntry {
+  id            String      @id @default(uuid())
+  signalFieldId String
+  dimension     String
+  driftDelta    Float
+  notes         String?
+  createdAt     DateTime    @default(now())
+  signalField   SignalField @relation(fields: [signalFieldId], references: [id], onDelete: Cascade)
+
+  @@index([signalFieldId, createdAt])
+  @@map("drift_log_entries")
+}
+
+model FractureMap {
+  id            String      @id @default(uuid())
+  signalFieldId String
+  refsJson      Json?
+  severity      Float       @default(0)
+  createdAt     DateTime    @default(now())
+  signalField   SignalField @relation(fields: [signalFieldId], references: [id], onDelete: Cascade)
+
+  @@index([signalFieldId, createdAt])
+  @@map("fracture_maps")
+}
+
+model SekedScore {
+  id                  String   @id @default(uuid())
+  runId               String   @unique
+  escalationLevel     Int
+  detrimentalScore    Float
+  fractureDetected    Boolean
+  fractureMapRefs     Json
+  driftDelta          Float
+  trustAnomalies      Json
+  requiredValidations Json
+  signalFieldUpdates  Json
+  createdAt           DateTime @default(now())
+  run                 Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@map("seked_scores")
 }

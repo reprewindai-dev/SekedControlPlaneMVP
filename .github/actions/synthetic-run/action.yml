@@ -1,0 +1,193 @@
+name: 'Seked Synthetic Run'
+description: 'Create a real control-plane run, poll it to completion, and surface routing and quality outputs'
+
+inputs:
+  base-url:
+    description: 'Deployed Seked control plane base URL'
+    required: true
+  api-key:
+    description: 'Bearer API key for the Seked control plane'
+    required: true
+  project-id:
+    description: 'Project identifier to execute against'
+    required: true
+  policy-profile-id:
+    description: 'Policy profile identifier to execute against'
+    required: true
+  schema-id:
+    description: 'Schema identifier to execute against'
+    required: true
+  provider-preference:
+    description: 'Comma-separated provider preference list'
+    required: false
+    default: ''
+  task-type:
+    description: 'Task type recorded on the run'
+    required: false
+    default: 'synthetic_evaluation'
+  risk-level:
+    description: 'Risk level recorded on the run'
+    required: false
+    default: 'medium'
+  input-text:
+    description: 'Input text used for the synthetic request payload'
+    required: false
+    default: 'scheduled seked control-plane benchmark'
+  latency-ms-max:
+    description: 'Optional latency budget'
+    required: false
+    default: '5000'
+  cost-usd-max:
+    description: 'Optional cost budget'
+    required: false
+    default: '0.05'
+  poll-interval-seconds:
+    description: 'Polling interval while waiting for completion'
+    required: false
+    default: '5'
+  poll-timeout-seconds:
+    description: 'Maximum time to wait for completion'
+    required: false
+    default: '180'
+
+outputs:
+  run-id:
+    description: 'Created run identifier'
+    value: ${{ steps.run.outputs.run-id }}
+  final-status:
+    description: 'Final run status'
+    value: ${{ steps.run.outputs.final-status }}
+  provider:
+    description: 'Selected provider'
+    value: ${{ steps.run.outputs.provider }}
+  region:
+    description: 'Selected region'
+    value: ${{ steps.run.outputs.region }}
+  quality-score:
+    description: 'Final quality score'
+    value: ${{ steps.run.outputs.quality-score }}
+  detrimental-score:
+    description: 'Seked detrimental score'
+    value: ${{ steps.run.outputs.detrimental-score }}
+  attempts-used:
+    description: 'Convergence attempts used'
+    value: ${{ steps.run.outputs.attempts-used }}
+  routing-latency-ms:
+    description: 'Observed routing latency'
+    value: ${{ steps.run.outputs.routing-latency-ms }}
+  routing-cost-usd:
+    description: 'Routing cost estimate'
+    value: ${{ steps.run.outputs.routing-cost-usd }}
+  artifact-dir:
+    description: 'Directory containing the run payload, submission, and final detail'
+    value: ${{ steps.run.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: run
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        base_url="${{ inputs.base-url }}"
+        base_url="${base_url%/}"
+        auth_header="Authorization: Bearer ${{ inputs.api-key }}"
+        artifact_dir="$RUNNER_TEMP/seked-synthetic-run"
+        mkdir -p "$artifact_dir"
+
+        provider_pref_json="$(jq -cn --arg prefs "${{ inputs.provider-preference }}" '
+          $prefs
+          | split(",")
+          | map(gsub("^\\s+|\\s+$"; ""))
+          | map(select(length > 0))
+        ')"
+
+        jq -n \
+          --arg projectId "${{ inputs.project-id }}" \
+          --arg policyId "${{ inputs.policy-profile-id }}" \
+          --arg schemaId "${{ inputs.schema-id }}" \
+          --arg taskType "${{ inputs.task-type }}" \
+          --arg riskLevel "${{ inputs.risk-level }}" \
+          --arg inputText "${{ inputs.input-text }}" \
+          --argjson providerPrefs "${provider_pref_json}" \
+          --argjson latencyMax "${{ inputs.latency-ms-max }}" \
+          --argjson costMax "${{ inputs.cost-usd-max }}" \
+          '{
+            project_id: $projectId,
+            policy_profile_id: $policyId,
+            schema_id: $schemaId,
+            task: {
+              type: $taskType,
+              risk_level: $riskLevel
+            },
+            inputs: {
+              prompt: $inputText,
+              source: "github-actions",
+              timestamp: (now | todateiso8601)
+            },
+            constraints: {
+              latency_ms_max: $latencyMax,
+              cost_usd_max: $costMax
+            }
+          }
+          + (if ($providerPrefs | length) > 0
+              then { execution: { provider_preference: $providerPrefs } }
+              else {}
+            end)' \
+          > "${artifact_dir}/payload.json"
+
+        curl --fail-with-body --silent --show-error \
+          -X POST \
+          -H "${auth_header}" \
+          -H "Content-Type: application/json" \
+          --data @"${artifact_dir}/payload.json" \
+          "${base_url}/runs" \
+          > "${artifact_dir}/submission.json"
+
+        run_id="$(jq -r '.run_id // empty' "${artifact_dir}/submission.json")"
+        if [[ -z "${run_id}" ]]; then
+          echo "Missing run_id in submission response" >&2
+          cat "${artifact_dir}/submission.json" >&2
+          exit 1
+        fi
+
+        deadline=$(( $(date +%s) + ${{ inputs.poll-timeout-seconds }} ))
+        final_status=""
+
+        while [[ "$(date +%s)" -lt "${deadline}" ]]; do
+          curl --fail-with-body --silent --show-error \
+            -H "${auth_header}" \
+            "${base_url}/runs/${run_id}" \
+            > "${artifact_dir}/run-detail.json"
+
+          final_status="$(jq -r '.status // empty' "${artifact_dir}/run-detail.json")"
+          if [[ "${final_status}" == "completed" || "${final_status}" == "failed" ]]; then
+            break
+          fi
+
+          sleep "${{ inputs.poll-interval-seconds }}"
+        done
+
+        if [[ "${final_status}" != "completed" && "${final_status}" != "failed" ]]; then
+          echo "Timed out waiting for run ${run_id} to finish" >&2
+          cat "${artifact_dir}/run-detail.json" >&2
+          exit 1
+        fi
+
+        echo "run-id=${run_id}" >> "$GITHUB_OUTPUT"
+        echo "final-status=${final_status}" >> "$GITHUB_OUTPUT"
+        echo "provider=$(jq -r '.routingDecision.provider // ""' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "region=$(jq -r '.routingDecision.region // ""' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "quality-score=$(jq -r '.convergenceRun.finalQualityScore // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "detrimental-score=$(jq -r '.sekedScore.detrimentalScore // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "attempts-used=$(jq -r '.convergenceRun.attemptsUsed // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "routing-latency-ms=$(jq -r '.routingDecision.estimatedLatencyMs // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "routing-cost-usd=$(jq -r '.routingDecision.estimatedCostUsd // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
+        echo "artifact-dir=${artifact_dir}" >> "$GITHUB_OUTPUT"
+
+        if [[ "${final_status}" != "completed" ]]; then
+          echo "Synthetic run ${run_id} finished with status ${final_status}" >&2
+          cat "${artifact_dir}/run-detail.json" >&2
+          exit 1
+        fi

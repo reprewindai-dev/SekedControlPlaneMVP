@@ -18,6 +18,7 @@ FROM dependencies AS build
 COPY --chown=node:node tsconfig.json ./
 COPY --chown=node:node src/ ./src/
 RUN npm run build
+RUN npm run prisma:generate
 
 # Security scanning stage
 FROM build AS security-scan
@@ -59,7 +60,7 @@ USER node
 
 # Use tini as init system
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "dist/server.js"]
+CMD ["npm", "run", "start:prod"]
 
 # Expose port
 EXPOSE 8080
