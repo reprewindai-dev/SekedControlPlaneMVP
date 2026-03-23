@@ -1,3 +1,4 @@
+import type { GridIntensitySample, Prisma, ProviderRegionBaseline } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
 export interface EcobeInput {
@@ -43,6 +44,27 @@ type CandidateBaseline = {
   lastObservedAt: Date;
 };
 
+type CandidateEvaluation = CandidateBaseline & {
+  carbonIntensityGco2Kwh: number;
+  composite: number;
+  normalizedLatency: number;
+  normalizedCost: number;
+  normalizedCarbon: number;
+  usedLiveGridSample: boolean;
+};
+
+type RoutingDecisionWithRun = Prisma.RoutingDecisionGetPayload<{
+  include: {
+    run: {
+      select: {
+        orgId: true;
+        startedAt: true;
+        completedAt: true;
+      };
+    };
+  };
+}>;
+
 export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
   const orgId = String(input.policyConfig.orgId);
   const routingPolicy = await prisma.routingPolicy.findFirst({
@@ -51,7 +73,7 @@ export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
   const weights = normalizeWeights((routingPolicy?.weightsJson as any) ?? { carbon: 0.4, cost: 0.3, latency: 0.3 });
   const preferredProviders = resolveProviderPreferences(input.policyConfig, input.execution);
 
-  let baselines = await prisma.providerRegionBaseline.findMany({
+  let baselines: ProviderRegionBaseline[] = await prisma.providerRegionBaseline.findMany({
     where: {
       orgId,
       provider: preferredProviders.length > 0 ? { in: preferredProviders } : undefined,
@@ -74,29 +96,29 @@ export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
     throw new Error('No persisted provider-region performance baselines available for routing');
   }
 
-  const gridSamples = await prisma.gridIntensitySample.findMany({
+  const gridSamples: GridIntensitySample[] = await prisma.gridIntensitySample.findMany({
     where: {
       validUntil: { gt: new Date() },
-      region: { in: Array.from(new Set(baselines.map((entry) => entry.region))) },
+      region: { in: Array.from(new Set<string>(baselines.map((entry: ProviderRegionBaseline) => entry.region))) },
     },
     orderBy: { ts: 'desc' },
   });
 
-  const candidates = baselines.map((baseline) => {
-    const liveGridSample = gridSamples.find((sample) => sample.region === baseline.region);
+  const candidates: CandidateEvaluation[] = baselines.map((baseline: ProviderRegionBaseline) => {
+    const liveGridSample = gridSamples.find((sample: GridIntensitySample) => sample.region === baseline.region);
     const carbonIntensity = liveGridSample?.carbonIntensityGco2Kwh ?? baseline.avgCarbonIntensityGco2Kwh;
 
     const normalizedLatency = normalizeMetric(
       baseline.avgLatencyMs,
-      baselines.map((entry) => entry.avgLatencyMs),
+      baselines.map((entry: ProviderRegionBaseline) => entry.avgLatencyMs),
     );
     const normalizedCost = normalizeMetric(
       baseline.avgCostUsd,
-      baselines.map((entry) => entry.avgCostUsd),
+      baselines.map((entry: ProviderRegionBaseline) => entry.avgCostUsd),
     );
     const normalizedCarbon = normalizeMetric(
       carbonIntensity,
-      baselines.map((entry) => entry.avgCarbonIntensityGco2Kwh),
+      baselines.map((entry: ProviderRegionBaseline) => entry.avgCarbonIntensityGco2Kwh),
     );
 
     const composite =
@@ -115,20 +137,22 @@ export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
     };
   });
 
-  const filtered = candidates.filter((candidate) => {
+  const filtered = candidates.filter((candidate: CandidateEvaluation) => {
     if (input.constraints?.latency_ms_max && candidate.avgLatencyMs > input.constraints.latency_ms_max) return false;
     if (input.constraints?.cost_usd_max && candidate.avgCostUsd > input.constraints.cost_usd_max) return false;
     return true;
   });
 
   const choicePool = filtered.length > 0 ? filtered : candidates;
-  const chosen = choicePool.reduce((best, current) => (current.composite < best.composite ? current : best));
+  const chosen = choicePool.reduce((best: CandidateEvaluation, current: CandidateEvaluation) =>
+    current.composite < best.composite ? current : best,
+  );
 
   const decisionTrace = {
     weights,
     preferredProviders,
     constraints: input.constraints ?? null,
-    candidates: candidates.map((candidate) => ({
+    candidates: candidates.map((candidate: CandidateEvaluation) => ({
       provider: candidate.provider,
       region: candidate.region,
       sampleCount: candidate.sampleCount,
@@ -186,7 +210,7 @@ export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
 }
 
 async function rebuildProviderRegionBaselines(orgId: string, providers: string[]) {
-  const decisions = await prisma.routingDecision.findMany({
+  const decisions: RoutingDecisionWithRun[] = await prisma.routingDecision.findMany({
     where: {
       provider: providers.length > 0 ? { in: providers } : undefined,
       run: {

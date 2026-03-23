@@ -1,3 +1,4 @@
+import type { Prisma, ProviderRegionBaseline } from '@prisma/client';
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
@@ -38,6 +39,75 @@ const providerObservationSchema = z.object({
   observedAt: z.string().datetime().optional(),
   metadata: z.record(z.any()).optional(),
 });
+
+type AnalyticsRun = Prisma.RunGetPayload<{
+  include: {
+    project: true;
+    policyProfile: true;
+    sekedScore: true;
+    convergenceRun: true;
+    routingDecision: true;
+    usageRecords: true;
+  };
+}>;
+
+type ProviderAnalyticsDecision = Prisma.RoutingDecisionGetPayload<{
+  include: {
+    run: {
+      select: {
+        status: true;
+        startedAt: true;
+        completedAt: true;
+        convergenceRun: {
+          select: {
+            finalQualityScore: true;
+          };
+        };
+      };
+    };
+  };
+}>;
+
+type ProviderBaselineSnapshot = {
+  sampleCount: number;
+  avgLatencyMs: number;
+  avgCostUsd: number;
+  avgCarbonIntensityGco2Kwh: number;
+  lastObservedAt: Date;
+};
+
+type ProviderRegionRow = {
+  provider: string;
+  region: string;
+  baseline: ProviderBaselineSnapshot | null;
+  recent: {
+    days: number;
+    runs: number;
+    completed: number;
+    failed: number;
+    successRate: number;
+    avgQualityScore: number;
+    avgObservedLatencyMs: number;
+    avgObservedCostUsd: number;
+    lastDecisionAt: Date | null;
+  };
+};
+
+type ProviderRollupAccumulator = Record<
+  string,
+  {
+    provider: string;
+    regions: number;
+    totalSampleCount: number;
+    recentRuns: number;
+    recentCompleted: number;
+    recentFailed: number;
+    baselineLatencies: number[];
+    baselineCosts: number[];
+    baselineCarbons: number[];
+    recentQualities: number[];
+  }
+>;
 
 router.post('/', async (req: AuthedRequest, res: Response) => {
   const orgId = req.orgId;
@@ -138,7 +208,7 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
   const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200);
 
   try {
-    const runs = await prisma.run.findMany({
+    const runs: AnalyticsRun[] = await prisma.run.findMany({
       where: { orgId },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -152,29 +222,31 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
       },
     });
 
-    const completedRuns = runs.filter((run) => run.status === 'completed');
+    const completedRuns = runs.filter((run: AnalyticsRun) => run.status === 'completed');
     const qualityScores = completedRuns
-      .map((run) => run.convergenceRun?.finalQualityScore)
-      .filter((value): value is number => typeof value === 'number');
+      .map((run: AnalyticsRun) => run.convergenceRun?.finalQualityScore)
+      .filter((value: number | null | undefined): value is number => typeof value === 'number');
     const detrimentalScores = runs
-      .map((run) => run.sekedScore?.detrimentalScore)
-      .filter((value): value is number => typeof value === 'number');
+      .map((run: AnalyticsRun) => run.sekedScore?.detrimentalScore)
+      .filter((value: number | null | undefined): value is number => typeof value === 'number');
     const attempts = runs
-      .map((run) => resolveAttemptsUsed(run))
-      .filter((value): value is number => typeof value === 'number');
+      .map((run: AnalyticsRun) => resolveAttemptsUsed(run))
+      .filter((value: number | null): value is number => typeof value === 'number');
     const routingLatencies = runs
-      .map((run) => run.routingDecision?.estimatedLatencyMs)
-      .filter((value): value is number => typeof value === 'number');
+      .map((run: AnalyticsRun) => run.routingDecision?.estimatedLatencyMs)
+      .filter((value: number | null | undefined): value is number => typeof value === 'number');
     const routingCosts = runs
-      .map((run) => run.routingDecision?.estimatedCostUsd)
-      .filter((value): value is number => typeof value === 'number');
+      .map((run: AnalyticsRun) => run.routingDecision?.estimatedCostUsd)
+      .filter((value: number | null | undefined): value is number => typeof value === 'number');
     const completionLatencies = completedRuns
-      .map((run) => run.completedAt && run.createdAt ? run.completedAt.getTime() - run.createdAt.getTime() : null)
-      .filter((value): value is number => typeof value === 'number');
-    const totalUsageCost = runs.reduce((sum, run) => {
+      .map((run: AnalyticsRun) =>
+        run.completedAt && run.createdAt ? run.completedAt.getTime() - run.createdAt.getTime() : null,
+      )
+      .filter((value: number | null): value is number => typeof value === 'number');
+    const totalUsageCost = runs.reduce((sum: number, run: AnalyticsRun) => {
       return (
         sum +
-        run.usageRecords.reduce((inner, usage) => inner + Number(usage.totalCost ?? 0), 0)
+        run.usageRecords.reduce((inner: number, usage) => inner + Number(usage.totalCost ?? 0), 0)
       );
     }, 0);
 
@@ -182,7 +254,7 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
       totals: {
         runs: runs.length,
         completed: completedRuns.length,
-        failed: runs.filter((run) => run.status === 'failed').length,
+        failed: runs.filter((run: AnalyticsRun) => run.status === 'failed').length,
       },
       averages: {
         qualityScore: average(qualityScores),
@@ -193,7 +265,7 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
         completionLatencyMs: average(completionLatencies),
         usageCostUsd: roundCurrency(totalUsageCost / Math.max(runs.length, 1)),
       },
-      recentRuns: runs.slice(0, 20).map((run) => ({
+      recentRuns: runs.slice(0, 20).map((run: AnalyticsRun) => ({
         id: run.id,
         status: run.status,
         taskType: run.taskType,
@@ -344,7 +416,7 @@ router.get('/analytics/providers', async (req: AuthedRequest, res: Response) => 
 
     const statsByKey = new Map<string, ProviderStats>();
 
-    for (const decision of decisions) {
+    for (const decision of decisions as ProviderAnalyticsDecision[]) {
       const key = `${decision.provider}::${decision.region}`;
       const stats =
         statsByKey.get(key) ??
@@ -387,15 +459,22 @@ router.get('/analytics/providers', async (req: AuthedRequest, res: Response) => 
       statsByKey.set(key, stats);
     }
 
-    const baselinesByKey = new Map(
-      baselines.map((baseline) => [`${baseline.provider}::${baseline.region}`, baseline]),
+    const baselinesByKey = new Map<string, ProviderRegionBaseline>(
+      (baselines as ProviderRegionBaseline[]).map(
+        (baseline: ProviderRegionBaseline): [string, ProviderRegionBaseline] => [
+          `${baseline.provider}::${baseline.region}`,
+          baseline,
+        ],
+      ),
     );
 
-    const providerRegionRows = Array.from(
-      new Set([...baselinesByKey.keys(), ...statsByKey.keys()]),
-    )
+    const providerRegionKeys = Array.from(
+      new Set<string>([...Array.from(baselinesByKey.keys()), ...Array.from(statsByKey.keys())]),
+    );
+
+    const providerRegionRows: ProviderRegionRow[] = providerRegionKeys
       .sort()
-      .map((key) => {
+      .map((key: string) => {
         const [provider, region] = key.split('::');
         const baseline = baselinesByKey.get(key) ?? null;
         const stats = statsByKey.get(key) ?? null;
@@ -427,23 +506,7 @@ router.get('/analytics/providers', async (req: AuthedRequest, res: Response) => 
       });
 
     const providerRollups = Object.values(
-      providerRegionRows.reduce<
-        Record<
-          string,
-          {
-            provider: string;
-            regions: number;
-            totalSampleCount: number;
-            recentRuns: number;
-            recentCompleted: number;
-            recentFailed: number;
-            baselineLatencies: number[];
-            baselineCosts: number[];
-            baselineCarbons: number[];
-            recentQualities: number[];
-          }
-        >
-      >((acc, row) => {
+      providerRegionRows.reduce<ProviderRollupAccumulator>((acc, row: ProviderRegionRow) => {
         const existing =
           acc[row.provider] ??
           {
@@ -477,7 +540,7 @@ router.get('/analytics/providers', async (req: AuthedRequest, res: Response) => 
         acc[row.provider] = existing;
         return acc;
       }, {}),
-    ).map((rollup) => ({
+    ).map((rollup: ProviderRollupAccumulator[string]) => ({
       provider: rollup.provider,
       regions: rollup.regions,
       totalSampleCount: rollup.totalSampleCount,
@@ -595,11 +658,12 @@ function averageCurrency(values: number[]) {
   return roundCurrency(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
-function resolveAttemptsUsed(run: any) {
+function resolveAttemptsUsed(run: Pick<AnalyticsRun, 'convergenceRun' | 'analyticsJson'>) {
   const direct = run.convergenceRun?.attemptsUsed;
   if (typeof direct === 'number' && direct > 0) return direct;
 
-  const fallback = run.analyticsJson?.convergence?.attemptsUsed;
+  const analytics = run.analyticsJson as { convergence?: { attemptsUsed?: number } } | null;
+  const fallback = analytics?.convergence?.attemptsUsed;
   if (typeof fallback === 'number' && fallback > 0) return fallback;
 
   return null;

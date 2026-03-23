@@ -23,7 +23,12 @@ jobs:
       run: npm ci
 
     - name: Lint
-      run: npm run lint || true
+      run: |
+        if [ -f eslint.config.js ] || [ -f eslint.config.cjs ] || [ -f .eslintrc ] || [ -f .eslintrc.js ] || [ -f .eslintrc.cjs ] || [ -f .eslintrc.json ]; then
+          npm run lint
+        else
+          echo "Skipping lint: no ESLint config present"
+        fi
 
     - name: Build
       run: npm run build
@@ -32,4 +37,9 @@ jobs:
       run: npm run prisma:generate
 
     - name: Test
-      run: npm test || true
+      run: |
+        if find src -type f \( -name "*.test.ts" -o -name "*.spec.ts" \) | grep -q .; then
+          npm test
+        else
+          echo "Skipping tests: no test files present"
+        fi
