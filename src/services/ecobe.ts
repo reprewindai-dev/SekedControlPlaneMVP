@@ -1,4 +1,3 @@
-import type { GridIntensitySample, Prisma, ProviderRegionBaseline } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 
 export interface EcobeInput {
@@ -44,6 +43,11 @@ type CandidateBaseline = {
   lastObservedAt: Date;
 };
 
+type GridIntensitySampleRecord = {
+  region: string;
+  carbonIntensityGco2Kwh: number;
+};
+
 type CandidateEvaluation = CandidateBaseline & {
   carbonIntensityGco2Kwh: number;
   composite: number;
@@ -53,17 +57,19 @@ type CandidateEvaluation = CandidateBaseline & {
   usedLiveGridSample: boolean;
 };
 
-type RoutingDecisionWithRun = Prisma.RoutingDecisionGetPayload<{
-  include: {
-    run: {
-      select: {
-        orgId: true;
-        startedAt: true;
-        completedAt: true;
-      };
-    };
+type RoutingDecisionWithRun = {
+  provider: string;
+  region: string;
+  estimatedLatencyMs: number;
+  estimatedCostUsd: number;
+  carbonIntensityGco2Kwh: number;
+  createdAt: Date;
+  run: {
+    orgId: string;
+    startedAt: Date | null;
+    completedAt: Date | null;
   };
-}>;
+};
 
 export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
   const orgId = String(input.policyConfig.orgId);
@@ -73,52 +79,52 @@ export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
   const weights = normalizeWeights((routingPolicy?.weightsJson as any) ?? { carbon: 0.4, cost: 0.3, latency: 0.3 });
   const preferredProviders = resolveProviderPreferences(input.policyConfig, input.execution);
 
-  let baselines: ProviderRegionBaseline[] = await prisma.providerRegionBaseline.findMany({
+  let baselines = (await prisma.providerRegionBaseline.findMany({
     where: {
       orgId,
       provider: preferredProviders.length > 0 ? { in: preferredProviders } : undefined,
     },
     orderBy: [{ sampleCount: 'desc' }, { lastObservedAt: 'desc' }],
-  });
+  })) as CandidateBaseline[];
 
   if (baselines.length === 0) {
     await rebuildProviderRegionBaselines(orgId, preferredProviders);
-    baselines = await prisma.providerRegionBaseline.findMany({
+    baselines = (await prisma.providerRegionBaseline.findMany({
       where: {
         orgId,
         provider: preferredProviders.length > 0 ? { in: preferredProviders } : undefined,
       },
       orderBy: [{ sampleCount: 'desc' }, { lastObservedAt: 'desc' }],
-    });
+    })) as CandidateBaseline[];
   }
 
   if (baselines.length === 0) {
     throw new Error('No persisted provider-region performance baselines available for routing');
   }
 
-  const gridSamples: GridIntensitySample[] = await prisma.gridIntensitySample.findMany({
+  const gridSamples = (await prisma.gridIntensitySample.findMany({
     where: {
       validUntil: { gt: new Date() },
-      region: { in: Array.from(new Set<string>(baselines.map((entry: ProviderRegionBaseline) => entry.region))) },
+      region: { in: Array.from(new Set<string>(baselines.map((entry: CandidateBaseline) => entry.region))) },
     },
     orderBy: { ts: 'desc' },
-  });
+  })) as GridIntensitySampleRecord[];
 
-  const candidates: CandidateEvaluation[] = baselines.map((baseline: ProviderRegionBaseline) => {
-    const liveGridSample = gridSamples.find((sample: GridIntensitySample) => sample.region === baseline.region);
+  const candidates: CandidateEvaluation[] = baselines.map((baseline: CandidateBaseline) => {
+    const liveGridSample = gridSamples.find((sample: GridIntensitySampleRecord) => sample.region === baseline.region);
     const carbonIntensity = liveGridSample?.carbonIntensityGco2Kwh ?? baseline.avgCarbonIntensityGco2Kwh;
 
     const normalizedLatency = normalizeMetric(
       baseline.avgLatencyMs,
-      baselines.map((entry: ProviderRegionBaseline) => entry.avgLatencyMs),
+      baselines.map((entry: CandidateBaseline) => entry.avgLatencyMs),
     );
     const normalizedCost = normalizeMetric(
       baseline.avgCostUsd,
-      baselines.map((entry: ProviderRegionBaseline) => entry.avgCostUsd),
+      baselines.map((entry: CandidateBaseline) => entry.avgCostUsd),
     );
     const normalizedCarbon = normalizeMetric(
       carbonIntensity,
-      baselines.map((entry: ProviderRegionBaseline) => entry.avgCarbonIntensityGco2Kwh),
+      baselines.map((entry: CandidateBaseline) => entry.avgCarbonIntensityGco2Kwh),
     );
 
     const composite =
@@ -210,7 +216,7 @@ export async function routeEcobe(input: EcobeInput): Promise<EcobeResult> {
 }
 
 async function rebuildProviderRegionBaselines(orgId: string, providers: string[]) {
-  const decisions: RoutingDecisionWithRun[] = await prisma.routingDecision.findMany({
+  const decisions = (await prisma.routingDecision.findMany({
     where: {
       provider: providers.length > 0 ? { in: providers } : undefined,
       run: {
@@ -223,7 +229,7 @@ async function rebuildProviderRegionBaselines(orgId: string, providers: string[]
       },
     },
     orderBy: { createdAt: 'asc' },
-  });
+  })) as RoutingDecisionWithRun[];
 
   const grouped = new Map<string, CandidateBaseline>();
 

@@ -1,4 +1,3 @@
-import type { Prisma, ProviderRegionBaseline } from '@prisma/client';
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
@@ -40,33 +39,45 @@ const providerObservationSchema = z.object({
   metadata: z.record(z.any()).optional(),
 });
 
-type AnalyticsRun = Prisma.RunGetPayload<{
-  include: {
-    project: true;
-    policyProfile: true;
-    sekedScore: true;
-    convergenceRun: true;
-    routingDecision: true;
-    usageRecords: true;
-  };
-}>;
+type AnalyticsRun = {
+  id: string;
+  status: string;
+  taskType: string;
+  riskLevel: string;
+  createdAt: Date;
+  completedAt: Date | null;
+  analyticsJson: unknown;
+  project: { name: string };
+  policyProfile: { name: string };
+  sekedScore: { detrimentalScore: number | null } | null;
+  convergenceRun: { finalQualityScore: number | null; attemptsUsed: number | null } | null;
+  routingDecision: { estimatedLatencyMs: number | null; estimatedCostUsd: unknown } | null;
+  usageRecords: Array<{ totalCost: unknown }>;
+};
 
-type ProviderAnalyticsDecision = Prisma.RoutingDecisionGetPayload<{
-  include: {
-    run: {
-      select: {
-        status: true;
-        startedAt: true;
-        completedAt: true;
-        convergenceRun: {
-          select: {
-            finalQualityScore: true;
-          };
-        };
-      };
-    };
+type ProviderAnalyticsDecision = {
+  provider: string;
+  region: string;
+  estimatedLatencyMs: number;
+  estimatedCostUsd: number;
+  createdAt: Date;
+  run: {
+    status: string;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    convergenceRun: { finalQualityScore: number | null } | null;
   };
-}>;
+};
+
+type ProviderRegionBaselineRecord = {
+  provider: string;
+  region: string;
+  sampleCount: number;
+  avgLatencyMs: number;
+  avgCostUsd: number;
+  avgCarbonIntensityGco2Kwh: number;
+  lastObservedAt: Date;
+};
 
 type ProviderBaselineSnapshot = {
   sampleCount: number;
@@ -208,7 +219,7 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
   const limit = Math.min(Math.max(Number(req.query.limit ?? 50), 1), 200);
 
   try {
-    const runs: AnalyticsRun[] = await prisma.run.findMany({
+    const runs = (await prisma.run.findMany({
       where: { orgId },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -220,7 +231,7 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
         routingDecision: true,
         usageRecords: true,
       },
-    });
+    })) as AnalyticsRun[];
 
     const completedRuns = runs.filter((run: AnalyticsRun) => run.status === 'completed');
     const qualityScores = completedRuns
@@ -236,8 +247,8 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
       .map((run: AnalyticsRun) => run.routingDecision?.estimatedLatencyMs)
       .filter((value: number | null | undefined): value is number => typeof value === 'number');
     const routingCosts = runs
-      .map((run: AnalyticsRun) => run.routingDecision?.estimatedCostUsd)
-      .filter((value: number | null | undefined): value is number => typeof value === 'number');
+      .map((run: AnalyticsRun) => toNumberOrNull(run.routingDecision?.estimatedCostUsd))
+      .filter((value: number | null): value is number => typeof value === 'number');
     const completionLatencies = completedRuns
       .map((run: AnalyticsRun) =>
         run.completedAt && run.createdAt ? run.completedAt.getTime() - run.createdAt.getTime() : null,
@@ -246,7 +257,10 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
     const totalUsageCost = runs.reduce((sum: number, run: AnalyticsRun) => {
       return (
         sum +
-        run.usageRecords.reduce((inner: number, usage) => inner + Number(usage.totalCost ?? 0), 0)
+        run.usageRecords.reduce(
+          (inner: number, usage: { totalCost: unknown }) => inner + Number(usage.totalCost ?? 0),
+          0,
+        )
       );
     }, 0);
 
@@ -278,7 +292,7 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
         detrimentalScore: run.sekedScore?.detrimentalScore ?? null,
         attemptsUsed: resolveAttemptsUsed(run),
         routingLatencyMs: run.routingDecision?.estimatedLatencyMs ?? null,
-        routingCostUsd: run.routingDecision?.estimatedCostUsd ?? null,
+        routingCostUsd: toNumberOrNull(run.routingDecision?.estimatedCostUsd),
       })),
     });
   } catch (err) {
@@ -414,23 +428,25 @@ router.get('/analytics/providers', async (req: AuthedRequest, res: Response) => 
       lastDecisionAt: Date | null;
     };
 
+    const typedBaselines = baselines as ProviderRegionBaselineRecord[];
+    const typedDecisions = decisions as ProviderAnalyticsDecision[];
     const statsByKey = new Map<string, ProviderStats>();
 
-    for (const decision of decisions as ProviderAnalyticsDecision[]) {
+    for (const decision of typedDecisions) {
       const key = `${decision.provider}::${decision.region}`;
       const stats =
         statsByKey.get(key) ??
-        {
+        ({
           provider: decision.provider,
           region: decision.region,
           recentRuns: 0,
           recentCompleted: 0,
           recentFailed: 0,
-          recentQualityScores: [],
-          recentObservedLatencies: [],
-          recentObservedCosts: [],
+          recentQualityScores: [] as number[],
+          recentObservedLatencies: [] as number[],
+          recentObservedCosts: [] as number[],
           lastDecisionAt: null,
-        };
+        } satisfies ProviderStats);
 
       stats.recentRuns += 1;
       if (decision.run.status === 'completed') stats.recentCompleted += 1;
@@ -459,9 +475,9 @@ router.get('/analytics/providers', async (req: AuthedRequest, res: Response) => 
       statsByKey.set(key, stats);
     }
 
-    const baselinesByKey = new Map<string, ProviderRegionBaseline>(
-      (baselines as ProviderRegionBaseline[]).map(
-        (baseline: ProviderRegionBaseline): [string, ProviderRegionBaseline] => [
+    const baselinesByKey = new Map<string, ProviderRegionBaselineRecord>(
+      typedBaselines.map(
+        (baseline: ProviderRegionBaselineRecord): [string, ProviderRegionBaselineRecord] => [
           `${baseline.provider}::${baseline.region}`,
           baseline,
         ],
@@ -656,6 +672,12 @@ function roundCurrency(value: number) {
 function averageCurrency(values: number[]) {
   if (values.length === 0) return 0;
   return roundCurrency(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function toNumberOrNull(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function resolveAttemptsUsed(run: Pick<AnalyticsRun, 'convergenceRun' | 'analyticsJson'>) {
