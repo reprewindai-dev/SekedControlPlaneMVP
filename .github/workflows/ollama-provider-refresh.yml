@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate required secrets
-        shell: pwsh
+        shell: powershell
         env:
           SEKED_CONTROL_PLANE_URL: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
           SEKED_CONTROL_PLANE_API_KEY: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
@@ -96,7 +96,7 @@ jobs:
           provider-days: '30'
 
       - name: Publish summary
-        shell: pwsh
+        shell: powershell
         run: |
           @"
           ## Ollama Provider Refresh

@@ -51,7 +51,7 @@ runs:
   using: 'composite'
   steps:
     - id: benchmark
-      shell: pwsh
+      shell: powershell
       run: |
         $ErrorActionPreference = 'Stop'
 
