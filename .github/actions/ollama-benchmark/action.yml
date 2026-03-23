@@ -52,14 +52,14 @@ runs:
   steps:
     - id: benchmark
       shell: powershell
+      env:
+        OLLAMA_PROMPT: ${{ inputs.prompt }}
       run: |
         $ErrorActionPreference = 'Stop'
 
         $baseUrl = '${{ inputs.ollama-base-url }}'.TrimEnd('/')
         $model = '${{ inputs.model }}'
-        $prompt = @'
-${{ inputs.prompt }}
-'@
+        $prompt = $env:OLLAMA_PROMPT
         $timeoutSeconds = [int]'${{ inputs.timeout-seconds }}'
 
         $artifactDir = Join-Path $env:RUNNER_TEMP 'ollama-benchmark'

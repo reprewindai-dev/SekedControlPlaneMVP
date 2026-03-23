@@ -53,6 +53,11 @@ runs:
       shell: powershell
       run: |
         $ErrorActionPreference = 'Stop'
+        function Get-Value($value, $defaultValue) {
+          if ($null -eq $value) { return $defaultValue }
+          if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $defaultValue }
+          return $value
+        }
 
         $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
         $apiKey = '${{ inputs.api-key }}'
@@ -82,8 +87,8 @@ runs:
         $response = Invoke-RestMethod -Method Post -Uri "$baseUrl/runs/analytics/providers/bootstrap" -Headers $headers -Body $payloadJson
         $response | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'response.json') -Encoding utf8
 
-        "sample-count=$($response.baseline.sampleCount ?? 0)" >> $env:GITHUB_OUTPUT
-        "avg-latency-ms=$($response.baseline.avgLatencyMs ?? 0)" >> $env:GITHUB_OUTPUT
-        "avg-cost-usd=$($response.baseline.avgCostUsd ?? 0)" >> $env:GITHUB_OUTPUT
-        "avg-carbon-intensity-gco2kwh=$($response.baseline.avgCarbonIntensityGco2Kwh ?? 0)" >> $env:GITHUB_OUTPUT
+        "sample-count=$(Get-Value $response.baseline.sampleCount 0)" >> $env:GITHUB_OUTPUT
+        "avg-latency-ms=$(Get-Value $response.baseline.avgLatencyMs 0)" >> $env:GITHUB_OUTPUT
+        "avg-cost-usd=$(Get-Value $response.baseline.avgCostUsd 0)" >> $env:GITHUB_OUTPUT
+        "avg-carbon-intensity-gco2kwh=$(Get-Value $response.baseline.avgCarbonIntensityGco2Kwh 0)" >> $env:GITHUB_OUTPUT
         "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT

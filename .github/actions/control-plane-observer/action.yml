@@ -57,6 +57,11 @@ runs:
       shell: powershell
       run: |
         $ErrorActionPreference = 'Stop'
+        function Get-Value($value, $defaultValue) {
+          if ($null -eq $value) { return $defaultValue }
+          if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $defaultValue }
+          return $value
+        }
 
         $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
         $apiKey = '${{ inputs.api-key }}'
@@ -78,12 +83,12 @@ runs:
         $providers = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/runs/analytics/providers?days=${{ inputs.provider-days }}"
         $providers | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'provider-analytics.json') -Encoding utf8
 
-        "health-status=$($health.status ?? 'unknown')" >> $env:GITHUB_OUTPUT
-        "total-runs=$($summary.totals.runs ?? 0)" >> $env:GITHUB_OUTPUT
-        "completed-runs=$($summary.totals.completed ?? 0)" >> $env:GITHUB_OUTPUT
-        "failed-runs=$($summary.totals.failed ?? 0)" >> $env:GITHUB_OUTPUT
-        "avg-quality-score=$($summary.averages.qualityScore ?? 0)" >> $env:GITHUB_OUTPUT
-        "avg-routing-latency-ms=$($summary.averages.routingLatencyMs ?? 0)" >> $env:GITHUB_OUTPUT
-        "avg-routing-cost-usd=$($summary.averages.routingCostUsd ?? 0)" >> $env:GITHUB_OUTPUT
-        "provider-count=$($providers.totals.providers ?? 0)" >> $env:GITHUB_OUTPUT
+        "health-status=$(Get-Value $health.status 'unknown')" >> $env:GITHUB_OUTPUT
+        "total-runs=$(Get-Value $summary.totals.runs 0)" >> $env:GITHUB_OUTPUT
+        "completed-runs=$(Get-Value $summary.totals.completed 0)" >> $env:GITHUB_OUTPUT
+        "failed-runs=$(Get-Value $summary.totals.failed 0)" >> $env:GITHUB_OUTPUT
+        "avg-quality-score=$(Get-Value $summary.averages.qualityScore 0)" >> $env:GITHUB_OUTPUT
+        "avg-routing-latency-ms=$(Get-Value $summary.averages.routingLatencyMs 0)" >> $env:GITHUB_OUTPUT
+        "avg-routing-cost-usd=$(Get-Value $summary.averages.routingCostUsd 0)" >> $env:GITHUB_OUTPUT
+        "provider-count=$(Get-Value $providers.totals.providers 0)" >> $env:GITHUB_OUTPUT
         "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT

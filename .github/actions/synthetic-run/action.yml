@@ -89,6 +89,11 @@ runs:
       shell: powershell
       run: |
         $ErrorActionPreference = 'Stop'
+        function Get-Value($value, $defaultValue) {
+          if ($null -eq $value) { return $defaultValue }
+          if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $defaultValue }
+          return $value
+        }
 
         $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
         $apiKey = '${{ inputs.api-key }}'
@@ -158,13 +163,13 @@ runs:
 
         "run-id=$runId" >> $env:GITHUB_OUTPUT
         "final-status=$finalStatus" >> $env:GITHUB_OUTPUT
-        "provider=$($detail.routingDecision.provider ?? '')" >> $env:GITHUB_OUTPUT
-        "region=$($detail.routingDecision.region ?? '')" >> $env:GITHUB_OUTPUT
-        "quality-score=$($detail.convergenceRun.finalQualityScore ?? 0)" >> $env:GITHUB_OUTPUT
-        "detrimental-score=$($detail.sekedScore.detrimentalScore ?? 0)" >> $env:GITHUB_OUTPUT
-        "attempts-used=$($detail.convergenceRun.attemptsUsed ?? 0)" >> $env:GITHUB_OUTPUT
-        "routing-latency-ms=$($detail.routingDecision.estimatedLatencyMs ?? 0)" >> $env:GITHUB_OUTPUT
-        "routing-cost-usd=$($detail.routingDecision.estimatedCostUsd ?? 0)" >> $env:GITHUB_OUTPUT
+        "provider=$(Get-Value $detail.routingDecision.provider '')" >> $env:GITHUB_OUTPUT
+        "region=$(Get-Value $detail.routingDecision.region '')" >> $env:GITHUB_OUTPUT
+        "quality-score=$(Get-Value $detail.convergenceRun.finalQualityScore 0)" >> $env:GITHUB_OUTPUT
+        "detrimental-score=$(Get-Value $detail.sekedScore.detrimentalScore 0)" >> $env:GITHUB_OUTPUT
+        "attempts-used=$(Get-Value $detail.convergenceRun.attemptsUsed 0)" >> $env:GITHUB_OUTPUT
+        "routing-latency-ms=$(Get-Value $detail.routingDecision.estimatedLatencyMs 0)" >> $env:GITHUB_OUTPUT
+        "routing-cost-usd=$(Get-Value $detail.routingDecision.estimatedCostUsd 0)" >> $env:GITHUB_OUTPUT
         "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT
 
         if ($finalStatus -ne 'completed') {
