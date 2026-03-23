@@ -41,7 +41,7 @@ jobs:
         run: |
           if ('${{ steps.observe.outputs.health-status }}' -ne 'ok') {
             throw "Control plane health check failed: ${{ steps.observe.outputs.health-status }}"
-          fi
+          }
 
       - name: Publish summary
         shell: powershell
