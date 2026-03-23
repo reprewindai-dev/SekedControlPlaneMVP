@@ -1,145 +1,37 @@
-version: "3.8"
-
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: seked
       POSTGRES_USER: seked
       POSTGRES_PASSWORD: sekedpass
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./SEKED_PLATFORM_SCHEMA.prisma:/prisma/schema.prisma:ro
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seked -d seked"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  redis:
-    image: redis:7-alpine
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      PORT: 8080
+      NODE_ENV: production
+      DATABASE_URL: postgresql://seked:sekedpass@postgres:5432/seked
     ports:
-      - "6379:6379"
-
-  gateway:
-    build:
-      context: .
-      dockerfile: services/gateway/Dockerfile
-    ports:
-      - "3000:3000"
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
-      - ADMIN_API_KEY=${ADMIN_API_KEY}
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  seked:
-    build:
-      context: .
-      dockerfile: services/seked/Dockerfile
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  convergeos:
-    build:
-      context: .
-      dockerfile: services/convergeos/Dockerfile
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  ecobe:
-    build:
-      context: .
-      dockerfile: services/ecobe/Dockerfile
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  watchtower:
-    build:
-      context: .
-      dockerfile: services/watchtower/Dockerfile
-    ports:
-      - "3004:3004"
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  celestial-navigator:
-    build:
-      context: .
-      dockerfile: services/celestial-navigator/Dockerfile
-    ports:
-      - "3005:3005"
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  acoustic-listener:
-    build:
-      context: .
-      dockerfile: services/acoustic-listener/Dockerfile
-    ports:
-      - "3006:3006"
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  empire-collapse:
-    build:
-      context: .
-      dockerfile: services/empire-collapse/Dockerfile
-    ports:
-      - "3007:3007"
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
-
-  shadow-tracker:
-    build:
-      context: .
-      dockerfile: services/shadow-tracker/Dockerfile
-    ports:
-      - "3008:3008"
-    environment:
-      - DATABASE_URL=postgresql://seked:sekedpass@postgres:5432/seked
-      - REDIS_URL=redis://redis:6379
-      - NODE_ENV=production
-    depends_on:
-      - postgres
-      - redis
+      - "8080:8080"
 
 volumes:
   postgres_data:

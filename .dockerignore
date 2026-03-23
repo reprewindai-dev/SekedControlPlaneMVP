@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+dist
+npm-debug.log
+.env
+.env.*
+!.env.example
+tmp-seed.cjs
+coverage
+*.tsbuildinfo
