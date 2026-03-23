@@ -54,43 +54,36 @@ runs:
   using: 'composite'
   steps:
     - id: observe
-      shell: bash
+      shell: powershell
       run: |
-        set -euo pipefail
+        $ErrorActionPreference = 'Stop'
 
-        base_url="${{ inputs.base-url }}"
-        base_url="${base_url%/}"
-        auth_header="Authorization: Bearer ${{ inputs.api-key }}"
-        artifact_dir="$RUNNER_TEMP/seked-control-plane-observer"
-        mkdir -p "$artifact_dir"
+        $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
+        $apiKey = '${{ inputs.api-key }}'
+        $headers = @{ Authorization = "Bearer $apiKey" }
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'seked-control-plane-observer'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-        usage_from="$(date -u -d "${{ inputs.usage-days }} days ago" +%Y-%m-%dT%H:%M:%SZ)"
+        $usageFrom = (Get-Date).ToUniversalTime().AddDays(-[int]'${{ inputs.usage-days }}').ToString('yyyy-MM-ddTHH:mm:ssZ')
 
-        curl --fail-with-body --silent --show-error \
-          "${base_url}/health" \
-          > "${artifact_dir}/health.json"
+        $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health"
+        $health | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'health.json') -Encoding utf8
 
-        curl --fail-with-body --silent --show-error \
-          -H "${auth_header}" \
-          "${base_url}/runs/analytics/summary?limit=${{ inputs.analytics-limit }}" \
-          > "${artifact_dir}/analytics-summary.json"
+        $summary = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/runs/analytics/summary?limit=${{ inputs.analytics-limit }}"
+        $summary | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'analytics-summary.json') -Encoding utf8
 
-        curl --fail-with-body --silent --show-error \
-          -H "${auth_header}" \
-          "${base_url}/usage?from=${usage_from}" \
-          > "${artifact_dir}/usage.json"
+        $usage = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/usage?from=$usageFrom"
+        $usage | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'usage.json') -Encoding utf8
 
-        curl --fail-with-body --silent --show-error \
-          -H "${auth_header}" \
-          "${base_url}/runs/analytics/providers?days=${{ inputs.provider-days }}" \
-          > "${artifact_dir}/provider-analytics.json"
+        $providers = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/runs/analytics/providers?days=${{ inputs.provider-days }}"
+        $providers | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'provider-analytics.json') -Encoding utf8
 
-        echo "health-status=$(jq -r '.status // "unknown"' "${artifact_dir}/health.json")" >> "$GITHUB_OUTPUT"
-        echo "total-runs=$(jq -r '.totals.runs // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
-        echo "completed-runs=$(jq -r '.totals.completed // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
-        echo "failed-runs=$(jq -r '.totals.failed // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
-        echo "avg-quality-score=$(jq -r '.averages.qualityScore // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
-        echo "avg-routing-latency-ms=$(jq -r '.averages.routingLatencyMs // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
-        echo "avg-routing-cost-usd=$(jq -r '.averages.routingCostUsd // 0' "${artifact_dir}/analytics-summary.json")" >> "$GITHUB_OUTPUT"
-        echo "provider-count=$(jq -r '.totals.providers // 0' "${artifact_dir}/provider-analytics.json")" >> "$GITHUB_OUTPUT"
-        echo "artifact-dir=${artifact_dir}" >> "$GITHUB_OUTPUT"
+        "health-status=$($health.status ?? 'unknown')" >> $env:GITHUB_OUTPUT
+        "total-runs=$($summary.totals.runs ?? 0)" >> $env:GITHUB_OUTPUT
+        "completed-runs=$($summary.totals.completed ?? 0)" >> $env:GITHUB_OUTPUT
+        "failed-runs=$($summary.totals.failed ?? 0)" >> $env:GITHUB_OUTPUT
+        "avg-quality-score=$($summary.averages.qualityScore ?? 0)" >> $env:GITHUB_OUTPUT
+        "avg-routing-latency-ms=$($summary.averages.routingLatencyMs ?? 0)" >> $env:GITHUB_OUTPUT
+        "avg-routing-cost-usd=$($summary.averages.routingCostUsd ?? 0)" >> $env:GITHUB_OUTPUT
+        "provider-count=$($providers.totals.providers ?? 0)" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT

@@ -86,108 +86,87 @@ runs:
   using: 'composite'
   steps:
     - id: run
-      shell: bash
+      shell: powershell
       run: |
-        set -euo pipefail
+        $ErrorActionPreference = 'Stop'
 
-        base_url="${{ inputs.base-url }}"
-        base_url="${base_url%/}"
-        auth_header="Authorization: Bearer ${{ inputs.api-key }}"
-        artifact_dir="$RUNNER_TEMP/seked-synthetic-run"
-        mkdir -p "$artifact_dir"
+        $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
+        $apiKey = '${{ inputs.api-key }}'
+        $headers = @{
+          Authorization = "Bearer $apiKey"
+          'Content-Type' = 'application/json'
+        }
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'seked-synthetic-run'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-        provider_pref_json="$(jq -cn --arg prefs "${{ inputs.provider-preference }}" '
-          $prefs
-          | split(",")
-          | map(gsub("^\\s+|\\s+$"; ""))
-          | map(select(length > 0))
-        ')"
+        $providerPreference = @()
+        if (-not [string]::IsNullOrWhiteSpace('${{ inputs.provider-preference }}')) {
+          $providerPreference = '${{ inputs.provider-preference }}'.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+        }
 
-        jq -n \
-          --arg projectId "${{ inputs.project-id }}" \
-          --arg policyId "${{ inputs.policy-profile-id }}" \
-          --arg schemaId "${{ inputs.schema-id }}" \
-          --arg taskType "${{ inputs.task-type }}" \
-          --arg riskLevel "${{ inputs.risk-level }}" \
-          --arg inputText "${{ inputs.input-text }}" \
-          --argjson providerPrefs "${provider_pref_json}" \
-          --argjson latencyMax "${{ inputs.latency-ms-max }}" \
-          --argjson costMax "${{ inputs.cost-usd-max }}" \
-          '{
-            project_id: $projectId,
-            policy_profile_id: $policyId,
-            schema_id: $schemaId,
-            task: {
-              type: $taskType,
-              risk_level: $riskLevel
-            },
-            inputs: {
-              prompt: $inputText,
-              source: "github-actions",
-              timestamp: (now | todateiso8601)
-            },
-            constraints: {
-              latency_ms_max: $latencyMax,
-              cost_usd_max: $costMax
-            }
+        $payload = @{
+          project_id = '${{ inputs.project-id }}'
+          policy_profile_id = '${{ inputs.policy-profile-id }}'
+          schema_id = '${{ inputs.schema-id }}'
+          task = @{
+            type = '${{ inputs.task-type }}'
+            risk_level = '${{ inputs.risk-level }}'
           }
-          + (if ($providerPrefs | length) > 0
-              then { execution: { provider_preference: $providerPrefs } }
-              else {}
-            end)' \
-          > "${artifact_dir}/payload.json"
+          inputs = @{
+            prompt = '${{ inputs.input-text }}'
+            source = 'github-actions'
+            timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          }
+          constraints = @{
+            latency_ms_max = [double]'${{ inputs.latency-ms-max }}'
+            cost_usd_max = [double]'${{ inputs.cost-usd-max }}'
+          }
+        }
+        if ($providerPreference.Count -gt 0) {
+          $payload.execution = @{ provider_preference = $providerPreference }
+        }
 
-        curl --fail-with-body --silent --show-error \
-          -X POST \
-          -H "${auth_header}" \
-          -H "Content-Type: application/json" \
-          --data @"${artifact_dir}/payload.json" \
-          "${base_url}/runs" \
-          > "${artifact_dir}/submission.json"
+        $payloadPath = Join-Path $artifactDir 'payload.json'
+        $payloadJson = $payload | ConvertTo-Json -Depth 20
+        $payloadJson | Set-Content -Path $payloadPath -Encoding utf8
 
-        run_id="$(jq -r '.run_id // empty' "${artifact_dir}/submission.json")"
-        if [[ -z "${run_id}" ]]; then
-          echo "Missing run_id in submission response" >&2
-          cat "${artifact_dir}/submission.json" >&2
-          exit 1
-        fi
+        $submission = Invoke-RestMethod -Method Post -Uri "$baseUrl/runs" -Headers $headers -Body $payloadJson
+        $submission | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'submission.json') -Encoding utf8
 
-        deadline=$(( $(date +%s) + ${{ inputs.poll-timeout-seconds }} ))
-        final_status=""
+        $runId = $submission.run_id
+        if ([string]::IsNullOrWhiteSpace($runId)) {
+          throw 'Missing run_id in submission response'
+        }
 
-        while [[ "$(date +%s)" -lt "${deadline}" ]]; do
-          curl --fail-with-body --silent --show-error \
-            -H "${auth_header}" \
-            "${base_url}/runs/${run_id}" \
-            > "${artifact_dir}/run-detail.json"
+        $deadline = (Get-Date).ToUniversalTime().AddSeconds([int]'${{ inputs.poll-timeout-seconds }}')
+        $finalStatus = ''
+        $detail = $null
 
-          final_status="$(jq -r '.status // empty' "${artifact_dir}/run-detail.json")"
-          if [[ "${final_status}" == "completed" || "${final_status}" == "failed" ]]; then
+        while ((Get-Date).ToUniversalTime() -lt $deadline) {
+          $detail = Invoke-RestMethod -Method Get -Headers @{ Authorization = "Bearer $apiKey" } -Uri "$baseUrl/runs/$runId"
+          $detail | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'run-detail.json') -Encoding utf8
+          $finalStatus = "$($detail.status)"
+          if ($finalStatus -eq 'completed' -or $finalStatus -eq 'failed') {
             break
-          fi
+          }
+          Start-Sleep -Seconds ([int]'${{ inputs.poll-interval-seconds }}')
+        }
 
-          sleep "${{ inputs.poll-interval-seconds }}"
-        done
+        if ($finalStatus -ne 'completed' -and $finalStatus -ne 'failed') {
+          throw "Timed out waiting for run $runId to finish"
+        }
 
-        if [[ "${final_status}" != "completed" && "${final_status}" != "failed" ]]; then
-          echo "Timed out waiting for run ${run_id} to finish" >&2
-          cat "${artifact_dir}/run-detail.json" >&2
-          exit 1
-        fi
+        "run-id=$runId" >> $env:GITHUB_OUTPUT
+        "final-status=$finalStatus" >> $env:GITHUB_OUTPUT
+        "provider=$($detail.routingDecision.provider ?? '')" >> $env:GITHUB_OUTPUT
+        "region=$($detail.routingDecision.region ?? '')" >> $env:GITHUB_OUTPUT
+        "quality-score=$($detail.convergenceRun.finalQualityScore ?? 0)" >> $env:GITHUB_OUTPUT
+        "detrimental-score=$($detail.sekedScore.detrimentalScore ?? 0)" >> $env:GITHUB_OUTPUT
+        "attempts-used=$($detail.convergenceRun.attemptsUsed ?? 0)" >> $env:GITHUB_OUTPUT
+        "routing-latency-ms=$($detail.routingDecision.estimatedLatencyMs ?? 0)" >> $env:GITHUB_OUTPUT
+        "routing-cost-usd=$($detail.routingDecision.estimatedCostUsd ?? 0)" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT
 
-        echo "run-id=${run_id}" >> "$GITHUB_OUTPUT"
-        echo "final-status=${final_status}" >> "$GITHUB_OUTPUT"
-        echo "provider=$(jq -r '.routingDecision.provider // ""' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "region=$(jq -r '.routingDecision.region // ""' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "quality-score=$(jq -r '.convergenceRun.finalQualityScore // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "detrimental-score=$(jq -r '.sekedScore.detrimentalScore // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "attempts-used=$(jq -r '.convergenceRun.attemptsUsed // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "routing-latency-ms=$(jq -r '.routingDecision.estimatedLatencyMs // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "routing-cost-usd=$(jq -r '.routingDecision.estimatedCostUsd // 0' "${artifact_dir}/run-detail.json")" >> "$GITHUB_OUTPUT"
-        echo "artifact-dir=${artifact_dir}" >> "$GITHUB_OUTPUT"
-
-        if [[ "${final_status}" != "completed" ]]; then
-          echo "Synthetic run ${run_id} finished with status ${final_status}" >&2
-          cat "${artifact_dir}/run-detail.json" >&2
-          exit 1
-        fi
+        if ($finalStatus -ne 'completed') {
+          throw "Synthetic run $runId finished with status $finalStatus"
+        }

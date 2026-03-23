@@ -32,7 +32,7 @@ jobs:
           timeout-seconds: '180'
 
       - name: Publish benchmark summary
-        shell: pwsh
+        shell: powershell
         run: |
           @"
           ## Local Ollama Benchmark

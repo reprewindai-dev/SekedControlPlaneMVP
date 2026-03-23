@@ -37,29 +37,27 @@ jobs:
           provider-days: '30'
 
       - name: Assert healthy control plane
-        shell: bash
+        shell: powershell
         run: |
-          set -euo pipefail
-          if [[ "${{ steps.observe.outputs.health-status }}" != "ok" ]]; then
-            echo "Control plane health check failed: ${{ steps.observe.outputs.health-status }}" >&2
-            exit 1
+          if ('${{ steps.observe.outputs.health-status }}' -ne 'ok') {
+            throw "Control plane health check failed: ${{ steps.observe.outputs.health-status }}"
           fi
 
       - name: Publish summary
-        shell: bash
+        shell: powershell
         run: |
-          {
-            echo "## Seked Control Plane Observe"
-            echo ""
-            echo "- Health: \`${{ steps.observe.outputs.health-status }}\`"
-            echo "- Runs: \`${{ steps.observe.outputs.total-runs }}\`"
-            echo "- Completed: \`${{ steps.observe.outputs.completed-runs }}\`"
-            echo "- Failed: \`${{ steps.observe.outputs.failed-runs }}\`"
-            echo "- Avg quality score: \`${{ steps.observe.outputs.avg-quality-score }}\`"
-            echo "- Avg routing latency (ms): \`${{ steps.observe.outputs.avg-routing-latency-ms }}\`"
-            echo "- Avg routing cost (USD): \`${{ steps.observe.outputs.avg-routing-cost-usd }}\`"
-            echo "- Providers tracked: \`${{ steps.observe.outputs.provider-count }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          @"
+          ## Seked Control Plane Observe
+
+          - Health: `${{ steps.observe.outputs.health-status }}`
+          - Runs: `${{ steps.observe.outputs.total-runs }}`
+          - Completed: `${{ steps.observe.outputs.completed-runs }}`
+          - Failed: `${{ steps.observe.outputs.failed-runs }}`
+          - Avg quality score: `${{ steps.observe.outputs.avg-quality-score }}`
+          - Avg routing latency (ms): `${{ steps.observe.outputs.avg-routing-latency-ms }}`
+          - Avg routing cost (USD): `${{ steps.observe.outputs.avg-routing-cost-usd }}`
+          - Providers tracked: `${{ steps.observe.outputs.provider-count }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload telemetry artifact
         uses: actions/upload-artifact@v4

@@ -78,22 +78,22 @@ jobs:
           provider-days: '30'
 
       - name: Publish summary
-        shell: bash
+        shell: powershell
         run: |
-          {
-            echo "## Seked Control Plane Baseline Refresh"
-            echo ""
-            echo "- Run ID: \`${{ steps.run.outputs.run-id }}\`"
-            echo "- Final status: \`${{ steps.run.outputs.final-status }}\`"
-            echo "- Provider: \`${{ steps.run.outputs.provider }}\`"
-            echo "- Region: \`${{ steps.run.outputs.region }}\`"
-            echo "- Quality score: \`${{ steps.run.outputs.quality-score }}\`"
-            echo "- Detrimental score: \`${{ steps.run.outputs.detrimental-score }}\`"
-            echo "- Attempts used: \`${{ steps.run.outputs.attempts-used }}\`"
-            echo "- Routing latency (ms): \`${{ steps.run.outputs.routing-latency-ms }}\`"
-            echo "- Routing cost (USD): \`${{ steps.run.outputs.routing-cost-usd }}\`"
-            echo "- Providers tracked after refresh: \`${{ steps.observe.outputs.provider-count }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          @"
+          ## Seked Control Plane Baseline Refresh
+
+          - Run ID: `${{ steps.run.outputs.run-id }}`
+          - Final status: `${{ steps.run.outputs.final-status }}`
+          - Provider: `${{ steps.run.outputs.provider }}`
+          - Region: `${{ steps.run.outputs.region }}`
+          - Quality score: `${{ steps.run.outputs.quality-score }}`
+          - Detrimental score: `${{ steps.run.outputs.detrimental-score }}`
+          - Attempts used: `${{ steps.run.outputs.attempts-used }}`
+          - Routing latency (ms): `${{ steps.run.outputs.routing-latency-ms }}`
+          - Routing cost (USD): `${{ steps.run.outputs.routing-cost-usd }}`
+          - Providers tracked after refresh: `${{ steps.observe.outputs.provider-count }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload synthetic run artifact
         uses: actions/upload-artifact@v4

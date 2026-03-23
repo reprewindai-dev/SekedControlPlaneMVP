@@ -50,43 +50,40 @@ runs:
   using: 'composite'
   steps:
     - id: bootstrap
-      shell: bash
+      shell: powershell
       run: |
-        set -euo pipefail
+        $ErrorActionPreference = 'Stop'
 
-        base_url="${{ inputs.base-url }}"
-        base_url="${base_url%/}"
-        auth_header="Authorization: Bearer ${{ inputs.api-key }}"
-        artifact_dir="$RUNNER_TEMP/provider-baseline-bootstrap"
-        mkdir -p "$artifact_dir"
+        $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
+        $apiKey = '${{ inputs.api-key }}'
+        $headers = @{
+          Authorization = "Bearer $apiKey"
+          'Content-Type' = 'application/json'
+        }
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'provider-baseline-bootstrap'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-        jq -n \
-          --arg provider "${{ inputs.provider }}" \
-          --arg region "${{ inputs.region }}" \
-          --argjson observedLatencyMs "${{ inputs.observed-latency-ms }}" \
-          --argjson observedCostUsd "${{ inputs.observed-cost-usd }}" \
-          --argjson metadata "${{ inputs.metadata-json }}" \
-          --arg carbonOverride "${{ inputs.observed-carbon-intensity-gco2kwh }}" \
-          '{
-            provider: $provider,
-            region: $region,
-            observedLatencyMs: $observedLatencyMs,
-            observedCostUsd: $observedCostUsd,
-            metadata: $metadata
-          }
-          + (if $carbonOverride != "" then { observedCarbonIntensityGco2Kwh: ($carbonOverride | tonumber) } else {} end)' \
-          > "${artifact_dir}/payload.json"
+        $metadata = '${{ inputs.metadata-json }}' | ConvertFrom-Json
+        $payload = @{
+          provider = '${{ inputs.provider }}'
+          region = '${{ inputs.region }}'
+          observedLatencyMs = [double]'${{ inputs.observed-latency-ms }}'
+          observedCostUsd = [double]'${{ inputs.observed-cost-usd }}'
+          metadata = $metadata
+        }
+        if (-not [string]::IsNullOrWhiteSpace('${{ inputs.observed-carbon-intensity-gco2kwh }}')) {
+          $payload.observedCarbonIntensityGco2Kwh = [double]'${{ inputs.observed-carbon-intensity-gco2kwh }}'
+        }
 
-        curl --fail-with-body --silent --show-error \
-          -X POST \
-          -H "${auth_header}" \
-          -H "Content-Type: application/json" \
-          --data @"${artifact_dir}/payload.json" \
-          "${base_url}/runs/analytics/providers/bootstrap" \
-          > "${artifact_dir}/response.json"
+        $payloadPath = Join-Path $artifactDir 'payload.json'
+        $payloadJson = $payload | ConvertTo-Json -Depth 20
+        $payloadJson | Set-Content -Path $payloadPath -Encoding utf8
 
-        echo "sample-count=$(jq -r '.baseline.sampleCount // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
-        echo "avg-latency-ms=$(jq -r '.baseline.avgLatencyMs // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
-        echo "avg-cost-usd=$(jq -r '.baseline.avgCostUsd // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
-        echo "avg-carbon-intensity-gco2kwh=$(jq -r '.baseline.avgCarbonIntensityGco2Kwh // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
-        echo "artifact-dir=${artifact_dir}" >> "$GITHUB_OUTPUT"
+        $response = Invoke-RestMethod -Method Post -Uri "$baseUrl/runs/analytics/providers/bootstrap" -Headers $headers -Body $payloadJson
+        $response | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'response.json') -Encoding utf8
+
+        "sample-count=$($response.baseline.sampleCount ?? 0)" >> $env:GITHUB_OUTPUT
+        "avg-latency-ms=$($response.baseline.avgLatencyMs ?? 0)" >> $env:GITHUB_OUTPUT
+        "avg-cost-usd=$($response.baseline.avgCostUsd ?? 0)" >> $env:GITHUB_OUTPUT
+        "avg-carbon-intensity-gco2kwh=$($response.baseline.avgCarbonIntensityGco2Kwh ?? 0)" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT
