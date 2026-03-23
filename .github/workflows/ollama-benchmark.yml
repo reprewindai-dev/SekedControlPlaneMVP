@@ -6,7 +6,7 @@ on:
       model:
         description: 'Ollama model name available on the self-hosted runner'
         required: false
-        default: 'llama3.2:3b'
+        default: 'qwen2.5:1.5b'
       prompt:
         description: 'Prompt used for the benchmark'
         required: false

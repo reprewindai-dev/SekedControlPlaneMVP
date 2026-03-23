@@ -6,7 +6,7 @@ on:
       model:
         description: 'Ollama model name available on the self-hosted runner'
         required: false
-        default: 'llama3.2:3b'
+        default: 'qwen2.5:1.5b'
       provider_region:
         description: 'Region key to assign to the local Ollama provider baseline'
         required: false
