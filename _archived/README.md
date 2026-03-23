@@ -114,12 +114,18 @@ Required GitHub secrets:
     - `ollama`
   - benchmarks a local Ollama endpoint at `http://127.0.0.1:11434`
   - uploads raw benchmark JSON as an artifact
+- `ollama-provider-refresh.yml`
+  - benchmarks local Ollama
+  - bootstraps or updates the `ollama` provider baseline in the control plane
+  - executes a real synthetic run with `provider_preference=ollama`
+  - collects refreshed provider analytics after the run
 
 Optional GitHub repository variables:
 
 - `OLLAMA_BASE_URL`
 - `OLLAMA_MODEL`
 - `OLLAMA_BENCHMARK_PROMPT`
+- `OLLAMA_PROVIDER_REGION`
 
 Important boundary:
 

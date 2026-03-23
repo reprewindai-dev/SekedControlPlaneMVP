@@ -1,0 +1,126 @@
+name: Ollama Provider Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Ollama model name available on the self-hosted runner'
+        required: false
+        default: 'llama3.2:3b'
+      provider_region:
+        description: 'Region key to assign to the local Ollama provider baseline'
+        required: false
+        default: 'us-east-1'
+      prompt:
+        description: 'Prompt used for the Ollama benchmark'
+        required: false
+        default: 'Return a compact JSON object with keys summary and risk. Summary should describe carbon-aware routing in one sentence. Risk should be low, medium, or high.'
+  schedule:
+    - cron: '29 */12 * * *'
+
+jobs:
+  refresh:
+    if: ${{ secrets.SEKED_CONTROL_PLANE_URL != '' && secrets.SEKED_CONTROL_PLANE_API_KEY != '' && secrets.SEKED_PROJECT_ID != '' && secrets.SEKED_POLICY_PROFILE_ID != '' && secrets.SEKED_SCHEMA_ID != '' }}
+    runs-on: [self-hosted, Windows, X64, ollama]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Benchmark local Ollama
+        id: benchmark
+        uses: ./.github/actions/ollama-benchmark
+        with:
+          ollama-base-url: ${{ vars.OLLAMA_BASE_URL || 'http://127.0.0.1:11434' }}
+          model: ${{ github.event.inputs.model || vars.OLLAMA_MODEL || 'llama3.2:3b' }}
+          prompt: ${{ github.event.inputs.prompt || vars.OLLAMA_BENCHMARK_PROMPT || 'Return a compact JSON object with keys summary and risk. Summary should describe carbon-aware routing in one sentence. Risk should be low, medium, or high.' }}
+          timeout-seconds: '180'
+
+      - name: Bootstrap ollama provider baseline
+        id: bootstrap
+        uses: ./.github/actions/provider-baseline-bootstrap
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          provider: 'ollama'
+          region: ${{ github.event.inputs.provider_region || vars.OLLAMA_PROVIDER_REGION || 'us-east-1' }}
+          observed-latency-ms: ${{ steps.benchmark.outputs.total-duration-ms }}
+          observed-cost-usd: '0'
+          metadata-json: >-
+            {"source":"github-actions-ollama-benchmark","model":"${{ steps.benchmark.outputs.model }}","tokensPerSecond":"${{ steps.benchmark.outputs.tokens-per-second }}","evalCount":"${{ steps.benchmark.outputs.eval-count }}"}
+
+      - name: Execute control-plane synthetic run preferring ollama
+        id: synthetic
+        uses: ./.github/actions/synthetic-run
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          project-id: ${{ secrets.SEKED_PROJECT_ID }}
+          policy-profile-id: ${{ secrets.SEKED_POLICY_PROFILE_ID }}
+          schema-id: ${{ secrets.SEKED_SCHEMA_ID }}
+          provider-preference: 'ollama'
+          task-type: 'ollama_synthetic_evaluation'
+          risk-level: 'medium'
+          input-text: 'scheduled ollama-backed seked control-plane evaluation'
+          latency-ms-max: '10000'
+          cost-usd-max: '0.05'
+          poll-interval-seconds: '5'
+          poll-timeout-seconds: '180'
+
+      - name: Collect post-refresh provider analytics
+        id: observe
+        uses: ./.github/actions/control-plane-observer
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          analytics-limit: '20'
+          usage-days: '14'
+          provider-days: '30'
+
+      - name: Publish summary
+        shell: pwsh
+        run: |
+          @"
+          ## Ollama Provider Refresh
+
+          - Model: `${{ steps.benchmark.outputs.model }}`
+          - Benchmark total duration (ms): `${{ steps.benchmark.outputs.total-duration-ms }}`
+          - Benchmark tokens / second: `${{ steps.benchmark.outputs.tokens-per-second }}`
+          - Bootstrapped baseline sample count: `${{ steps.bootstrap.outputs.sample-count }}`
+          - Bootstrapped avg latency (ms): `${{ steps.bootstrap.outputs.avg-latency-ms }}`
+          - Synthetic run ID: `${{ steps.synthetic.outputs.run-id }}`
+          - Synthetic final status: `${{ steps.synthetic.outputs.final-status }}`
+          - Routed provider: `${{ steps.synthetic.outputs.provider }}`
+          - Routed region: `${{ steps.synthetic.outputs.region }}`
+          - Synthetic quality score: `${{ steps.synthetic.outputs.quality-score }}`
+          - Synthetic detrimental score: `${{ steps.synthetic.outputs.detrimental-score }}`
+          - Providers tracked after refresh: `${{ steps.observe.outputs.provider-count }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload Ollama benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-provider-refresh-benchmark
+          path: ${{ steps.benchmark.outputs.artifact-dir }}
+          if-no-files-found: error
+
+      - name: Upload baseline bootstrap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-provider-refresh-bootstrap
+          path: ${{ steps.bootstrap.outputs.artifact-dir }}
+          if-no-files-found: error
+
+      - name: Upload synthetic run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-provider-refresh-run
+          path: ${{ steps.synthetic.outputs.artifact-dir }}
+          if-no-files-found: error
+
+      - name: Upload provider analytics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ollama-provider-refresh-observe
+          path: ${{ steps.observe.outputs.artifact-dir }}
+          if-no-files-found: error

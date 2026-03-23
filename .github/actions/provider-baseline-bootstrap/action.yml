@@ -1,0 +1,92 @@
+name: 'Provider Baseline Bootstrap'
+description: 'Seed or update a provider-region baseline in the Seked control plane from an external benchmark observation'
+
+inputs:
+  base-url:
+    description: 'Deployed Seked control plane base URL'
+    required: true
+  api-key:
+    description: 'Bearer API key for the Seked control plane'
+    required: true
+  provider:
+    description: 'Provider identifier'
+    required: true
+  region:
+    description: 'Routing region identifier'
+    required: true
+  observed-latency-ms:
+    description: 'Observed latency in milliseconds'
+    required: true
+  observed-cost-usd:
+    description: 'Observed cost in USD'
+    required: true
+  observed-carbon-intensity-gco2kwh:
+    description: 'Observed carbon intensity override'
+    required: false
+    default: ''
+  metadata-json:
+    description: 'Optional JSON metadata object'
+    required: false
+    default: '{}'
+
+outputs:
+  sample-count:
+    description: 'Updated baseline sample count'
+    value: ${{ steps.bootstrap.outputs.sample-count }}
+  avg-latency-ms:
+    description: 'Updated average latency'
+    value: ${{ steps.bootstrap.outputs.avg-latency-ms }}
+  avg-cost-usd:
+    description: 'Updated average cost'
+    value: ${{ steps.bootstrap.outputs.avg-cost-usd }}
+  avg-carbon-intensity-gco2kwh:
+    description: 'Updated average carbon intensity'
+    value: ${{ steps.bootstrap.outputs.avg-carbon-intensity-gco2kwh }}
+  artifact-dir:
+    description: 'Directory containing request and response JSON'
+    value: ${{ steps.bootstrap.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: bootstrap
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        base_url="${{ inputs.base-url }}"
+        base_url="${base_url%/}"
+        auth_header="Authorization: Bearer ${{ inputs.api-key }}"
+        artifact_dir="$RUNNER_TEMP/provider-baseline-bootstrap"
+        mkdir -p "$artifact_dir"
+
+        jq -n \
+          --arg provider "${{ inputs.provider }}" \
+          --arg region "${{ inputs.region }}" \
+          --argjson observedLatencyMs "${{ inputs.observed-latency-ms }}" \
+          --argjson observedCostUsd "${{ inputs.observed-cost-usd }}" \
+          --argjson metadata "${{ inputs.metadata-json }}" \
+          --arg carbonOverride "${{ inputs.observed-carbon-intensity-gco2kwh }}" \
+          '{
+            provider: $provider,
+            region: $region,
+            observedLatencyMs: $observedLatencyMs,
+            observedCostUsd: $observedCostUsd,
+            metadata: $metadata
+          }
+          + (if $carbonOverride != "" then { observedCarbonIntensityGco2Kwh: ($carbonOverride | tonumber) } else {} end)' \
+          > "${artifact_dir}/payload.json"
+
+        curl --fail-with-body --silent --show-error \
+          -X POST \
+          -H "${auth_header}" \
+          -H "Content-Type: application/json" \
+          --data @"${artifact_dir}/payload.json" \
+          "${base_url}/runs/analytics/providers/bootstrap" \
+          > "${artifact_dir}/response.json"
+
+        echo "sample-count=$(jq -r '.baseline.sampleCount // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
+        echo "avg-latency-ms=$(jq -r '.baseline.avgLatencyMs // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
+        echo "avg-cost-usd=$(jq -r '.baseline.avgCostUsd // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
+        echo "avg-carbon-intensity-gco2kwh=$(jq -r '.baseline.avgCarbonIntensityGco2Kwh // 0' "${artifact_dir}/response.json")" >> "$GITHUB_OUTPUT"
+        echo "artifact-dir=${artifact_dir}" >> "$GITHUB_OUTPUT"

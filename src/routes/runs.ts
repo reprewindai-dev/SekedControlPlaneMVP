@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { AuthedRequest } from '../middleware/auth';
 import { executeThreePlanePipeline } from '../services/pipeline';
+import { recordRoutingObservation } from '../services/ecobe';
 
 const router = Router();
 
@@ -26,6 +27,16 @@ const createRunSchema = z.object({
       provider_preference: z.array(z.string()).optional(),
     })
     .optional(),
+});
+
+const providerObservationSchema = z.object({
+  provider: z.string().min(1),
+  region: z.string().min(1),
+  observedLatencyMs: z.number().positive(),
+  observedCostUsd: z.number().min(0),
+  observedCarbonIntensityGco2Kwh: z.number().positive().optional(),
+  observedAt: z.string().datetime().optional(),
+  metadata: z.record(z.any()).optional(),
 });
 
 router.post('/', async (req: AuthedRequest, res: Response) => {
@@ -201,6 +212,85 @@ router.get('/analytics/summary', async (req: AuthedRequest, res: Response) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Failed to fetch analytics summary' });
+  }
+});
+
+router.post('/analytics/providers/bootstrap', async (req: AuthedRequest, res: Response) => {
+  const orgId = req.orgId;
+  if (!orgId) return res.status(401).json({ error: 'Unauthorized' });
+  if (req.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+
+  const parsed = providerObservationSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid payload', details: parsed.error.errors });
+  }
+
+  const payload = parsed.data;
+
+  try {
+    const fallbackCarbon =
+      payload.observedCarbonIntensityGco2Kwh ??
+      (
+        await prisma.gridIntensitySample.findFirst({
+          where: {
+            OR: [{ orgId }, { orgId: null }],
+            region: payload.region,
+            validUntil: { gt: new Date() },
+          },
+          orderBy: { ts: 'desc' },
+        })
+      )?.carbonIntensityGco2Kwh ??
+      (
+        await prisma.providerRegionBaseline.findFirst({
+          where: { orgId, region: payload.region },
+          orderBy: { lastObservedAt: 'desc' },
+        })
+      )?.avgCarbonIntensityGco2Kwh;
+
+    if (typeof fallbackCarbon !== 'number' || Number.isNaN(fallbackCarbon)) {
+      return res.status(400).json({
+        error: 'Missing carbon intensity baseline for region',
+        message: `Provide observedCarbonIntensityGco2Kwh or seed grid intensity data for region ${payload.region}`,
+      });
+    }
+
+    await recordRoutingObservation({
+      orgId,
+      provider: payload.provider,
+      region: payload.region,
+      observedLatencyMs: payload.observedLatencyMs,
+      observedCostUsd: payload.observedCostUsd,
+      observedCarbonIntensityGco2Kwh: fallbackCarbon,
+      observedAt: payload.observedAt ? new Date(payload.observedAt) : new Date(),
+    });
+
+    const baseline = await prisma.providerRegionBaseline.findUnique({
+      where: {
+        orgId_provider_region: {
+          orgId,
+          provider: payload.provider,
+          region: payload.region,
+        },
+      },
+    });
+
+    return res.status(201).json({
+      provider: payload.provider,
+      region: payload.region,
+      baseline: baseline
+        ? {
+            sampleCount: baseline.sampleCount,
+            avgLatencyMs: roundMetric(baseline.avgLatencyMs),
+            avgCostUsd: roundCurrency(baseline.avgCostUsd),
+            avgCarbonIntensityGco2Kwh: roundMetric(baseline.avgCarbonIntensityGco2Kwh),
+            lastObservedAt: baseline.lastObservedAt,
+          }
+        : null,
+      metadata: payload.metadata ?? null,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to bootstrap provider baseline' });
   }
 });
 
