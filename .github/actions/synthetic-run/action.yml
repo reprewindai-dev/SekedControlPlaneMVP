@@ -104,9 +104,13 @@ runs:
         $artifactDir = Join-Path $env:RUNNER_TEMP 'seked-synthetic-run'
         New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
 
-        $providerPreference = @()
+        [string[]]$providerPreference = @()
         if (-not [string]::IsNullOrWhiteSpace('${{ inputs.provider-preference }}')) {
-          $providerPreference = '${{ inputs.provider-preference }}'.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          $providerPreference = @(
+            '${{ inputs.provider-preference }}'.Split(',') |
+              ForEach-Object { $_.Trim() } |
+              Where-Object { $_ }
+          )
         }
 
         $payload = @{
@@ -128,7 +132,7 @@ runs:
           }
         }
         if ($providerPreference.Count -gt 0) {
-          $payload.execution = @{ provider_preference = $providerPreference }
+          $payload.execution = @{ provider_preference = [string[]]$providerPreference }
         }
 
         $payloadPath = Join-Path $artifactDir 'payload.json'
