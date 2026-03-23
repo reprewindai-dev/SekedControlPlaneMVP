@@ -8,7 +8,7 @@ on:
 jobs:
   observe:
     if: ${{ secrets.SEKED_CONTROL_PLANE_URL != '' && secrets.SEKED_CONTROL_PLANE_API_KEY != '' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
       - name: Checkout
