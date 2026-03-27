@@ -1,0 +1,48 @@
+{
+  "name": "ecobe-mvp",
+  "version": "1.0.0",
+  "description": "Customer-facing governance control plane for ECOBE",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "start:production": "node scripts/start-production.mjs",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit --project tsconfig.typecheck.json",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "happy-path": "node scripts/happy-path.mjs",
+    "e2e:local": "node scripts/e2e-local.mjs",
+    "freestyle-writer:local": "node scripts/freestyle-writer-local-stack.mjs"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2",
+    "clsx": "^2.1.0",
+    "date-fns": "^3.3.0",
+    "lucide-react": "^0.344.0",
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "stripe": "^20.4.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.2.0",
+    "postcss": "^8.4.0",
+    "prisma": "^6.19.2",
+    "embedded-postgres": "^18.3.0-beta.16",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

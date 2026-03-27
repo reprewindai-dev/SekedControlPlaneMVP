@@ -1,0 +1,565 @@
+// Seked Control Platform - Complete Database Schema
+// Three-Plane Governance: Cognitive (Seked) + Output (ConvergeOS) + Resource (ECOBE)
+// Signal Coherence AGI: Navigator + Watchtower + Listener + Empire Collapse + Shadow Tracking
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================================================
+// MULTI-TENANCY CORE
+// =============================================================================
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  plan        String   // tier1, tier2, tier3, enterprise
+  status      String   @default("active") // active, suspended, trial
+  settings    Json?    // org-wide settings
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  projects    Project[]
+  apiKeys     ApiKey[]
+  users       User[]
+  policies    Policy[]
+  schemas     Schema[]
+  signalFields SignalField[]
+  routingPolicies RoutingPolicy[]
+  carbonCredits CarbonCredit[]
+  auditExports AuditExport[]
+  runs        Run[]
+  northStars  NorthStar[]
+  signalPatterns SignalPattern[]
+  collapsePatterns CollapsePattern[]
+  shadowPatterns ShadowPattern[]
+
+  @@map("orgs")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  environment String   // prod, staging, dev
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs        Run[]
+  signalFields SignalField[]
+
+  @@unique([orgId, name, environment])
+  @@map("projects")
+}
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  orgId      String
+  name       String
+  hashedKey  String   // bcrypt hash of the API key
+  role       String   // admin, developer, readonly
+  scopes     String[] // API scopes/permissions
+  lastUsedAt DateTime?
+  createdAt  DateTime @default(now())
+  revokedAt  DateTime?
+  expiresAt  DateTime?
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  orgId     String
+  email     String
+  name      String?
+  role      String   // admin, developer, analyst
+  status    String   @default("active") // active, inactive
+  lastLogin DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, email])
+  @@map("users")
+}
+
+// =============================================================================
+// RUNS + EVENTS (AUDIT LEDGER)
+// =============================================================================
+
+model Run {
+  id               String    @id @default(cuid())
+  orgId            String
+  projectId        String?
+  correlationId    String    @unique
+  policyProfileId  String?
+  schemaId         String?
+  status           String    // queued, running, completed, failed, blocked
+  inputsJson       Json?
+  finalOutputJson  Json?
+  createdAt        DateTime  @default(now())
+  startedAt        DateTime?
+  completedAt      DateTime?
+  durationMs       Int?
+
+  // Relations
+  organization     Organization @relation(fields: [orgId], references: [id])
+  project          Project?     @relation(fields: [projectId], references: [id])
+  policyProfile    Policy?      @relation(fields: [policyProfileId], references: [id])
+  schema           Schema?      @relation(fields: [schemaId], references: [id])
+  events           RunEvent[]
+  sekedScore       SekedScore?
+  convergenceRun   ConvergenceRun?
+  routingDecision  RoutingDecision?
+  usageRecords     UsageRecord[]
+  watchtowerValidation WatchtowerValidation?
+  celestialNavigation CelestialNavigation?
+  acousticAnalysis  AcousticAnalysis?
+  collapseAnalysis  CollapseAnalysis?
+  shadowAnalysis    ShadowAnalysis?
+
+  @@map("runs")
+}
+
+model RunEvent {
+  id        String    @id @default(cuid())
+  runId     String
+  type      String    // RUN_CREATED, SEKED_SCORED, CONVERGE_PASSED/FAILED, ECOBE_ROUTED, RUN_COMPLETED/BLOCKED, WATCHTOWER_VALIDATED, CELESTIAL_NAVIGATED, ACOUSTIC_ANALYZED, COLLAPSE_ANALYZED, SHADOW_TRACKED
+  data      Json
+  timestamp DateTime  @default(now())
+
+  // Relations
+  run       Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("run_events")
+}
+
+// =============================================================================
+// POLICY + SCHEMA
+// =============================================================================
+
+model Policy {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  description   String?
+  sekedConfig   Json     // Seked governance configuration
+  convergeConfig Json    // ConvergeOS configuration
+  ecobeConfig   Json     // ECOBE configuration
+  status        String   @default("draft") // draft, active, archived
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs          Run[]
+
+  @@map("policies")
+}
+
+model Schema {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  version     String
+  schemaJson  Json
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  runs        Run[]
+
+  @@unique([orgId, name, version])
+  @@map("schemas")
+}
+
+// =============================================================================
+// SEKED GOVERNANCE (COGNITIVE PLANE)
+// =============================================================================
+
+model SekedScore {
+  id                    String    @id @default(cuid())
+  runId                 String    @unique
+  detrimentalScore      Float
+  escalationLevel        Int       // 0, 1, 2
+  fractureDetected       Boolean
+  fractureMapRefs       String[]
+  driftDelta             Float
+  trustAnomalies         String[]
+  requiredValidations   String[]
+  signalFieldUpdates    Json
+  createdAt             DateTime  @default(now())
+
+  // Relations
+  run                   Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("seked_scores")
+}
+
+model SignalField {
+  id                String    @id @default(cuid())
+  orgId             String
+  projectId         String?
+  scope             String    // org, project
+  scopeId           String?
+  referenceStars    Json      // Stable truths, constraints, identity commitments
+  intentVectors     Json      // Direction and momentum of goals
+  trustWeights      Json      // Source reliability, recency, corroboration scores
+  fractureMap       Json      // Locations where narratives, evidence, or goals diverge
+  driftLogEntries   Json      // Drift events over time
+  smokeRelaySummaries Json    // Summaries passed forward through time
+  collapseIndicators Json      // Empire-failure patterns encoded as safeguards
+  sekedProportions  Json      // Perfect slope and proportion metrics
+  temporalChain     Json      // Cross-session temporal continuity
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  organization      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  project           Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("signal_fields")
+}
+
+// =============================================================================
+// CONVERGEOS RELIABILITY (OUTPUT PLANE)
+// =============================================================================
+
+model ConvergenceRun {
+  id               String    @id @default(cuid())
+  runId            String    @unique
+  converged        Boolean
+  attemptsUsed     Int
+  maxAttempts      Int
+  qualityThreshold  Float
+  finalQualityScore Float
+  createdAt        DateTime  @default(now())
+
+  // Relations
+  run              Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  attempts         ConvergenceAttempt[]
+
+  @@map("convergence_runs")
+}
+
+model ConvergenceAttempt {
+  id               String    @id @default(cuid())
+  convergenceRunId String
+  attemptIndex     Int
+  rawOutput        Json
+  schemaValid      Boolean
+  qualityScore     Float
+  errors           String[]
+  createdAt        DateTime  @default(now())
+
+  // Relations
+  convergenceRun   ConvergenceRun @relation(fields: [convergenceRunId], references: [id], onDelete: Cascade)
+
+  @@map("convergence_attempts")
+}
+
+// =============================================================================
+// ECOBE ROUTING (RESOURCE PLANE)
+// =============================================================================
+
+model RoutingDecision {
+  id                        String    @id @default(cuid())
+  runId                     String    @unique
+  provider                  String
+  region                    String
+  inputsJson                Json
+  estimatedCostUsd         Float
+  estimatedLatencyMs       Int
+  carbonIntensityGco2Kwh   Float
+  decisionTraceJson         Json
+  createdAt                 DateTime  @default(now())
+
+  // Relations
+  run                       Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("routing_decisions")
+}
+
+// =============================================================================
+// BILLING + USAGE
+// =============================================================================
+
+model UsageRecord {
+  id          String    @id @default(cuid())
+  orgId       String
+  runId       String?
+  metric      String
+  quantity    Float
+  unit        String
+  unitCost    Float
+  totalCost   Float
+  timestamp   DateTime  @default(now())
+
+  // Relations
+  run         Run?      @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("usage_records")
+}
+
+model BillingAccount {
+  id            String    @id @default(cuid())
+  orgId         String    @unique
+  stripeId      String?
+  status        String
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("billing_accounts")
+}
+
+// =============================================================================
+// CELESTIAL NAVIGATOR (LONG-HORIZON PLANNING)
+// =============================================================================
+
+model NorthStar {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String
+  direction   Json     // 3D vector representing mission direction
+  strength    Float    // How strongly this north star guides decisions
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  navigations CelestialNavigation[]
+
+  @@map("north_stars")
+}
+
+model CelestialNavigation {
+  id               String    @id @default(cuid())
+  runId            String    @unique
+  northStarId      String
+  alignmentScore   Float
+  driftMagnitude   Float
+  driftDirection   Json
+  waypoints        Json
+  projectedStates  Json
+  navigatedAt      DateTime  @default(now())
+
+  // Relations
+  run              Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  northStar        NorthStar @relation(fields: [northStarId], references: [id])
+
+  @@map("celestial_navigations")
+}
+
+// =============================================================================
+// WATCHTOWER NETWORK (CONSISTENCY & VALIDATION)
+// =============================================================================
+
+model WatchtowerValidation {
+  id               String    @id @default(cuid())
+  runId            String    @unique
+  perspectives     Json
+  consensusScore   Float
+  consistencyScore Float
+  validatedAt      DateTime  @default(now())
+
+  // Relations
+  run              Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("watchtower_validations")
+}
+
+// =============================================================================
+// ACOUSTIC LISTENER (WEAK SIGNAL DETECTION)
+// =============================================================================
+
+model SignalPattern {
+  id           String    @id @default(cuid())
+  orgId        String
+  patternJson  Json
+  frequency    Float
+  lastSeen     DateTime
+  significance  Float
+  createdAt    DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("signal_patterns")
+}
+
+model AcousticAnalysis {
+  id                String    @id @default(cuid())
+  runId             String    @unique
+  patternMatches    Json
+  anomalies         Json
+  amplifiedSignals  Json
+  filteredSignals   Json
+  analyzedAt        DateTime  @default(now())
+
+  // Relations
+  run               Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("acoustic_analyses")
+}
+
+// =============================================================================
+// EMPIRE COLLAPSE PREVENTION (HISTORICAL FAILURE PATTERNS)
+// =============================================================================
+
+model CollapsePattern {
+  id           String    @id @default(cuid())
+  orgId        String
+  name         String
+  description  String
+  patternData  Json
+  severity     String
+  mitigations  Json
+  createdAt    DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("collapse_patterns")
+}
+
+model CollapseAnalysis {
+  id            String    @id @default(cuid())
+  runId         String    @unique
+  indicators    Json
+  checks        Json
+  overallRisk   Float
+  analyzedAt    DateTime  @default(now())
+
+  // Relations
+  run           Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("collapse_analyses")
+}
+
+// =============================================================================
+// SHADOW TRACKING (HIDDEN INTENT MODELING)
+// =============================================================================
+
+model ShadowPattern {
+  id           String    @id @default(cuid())
+  orgId        String
+  forceTypes   String[]
+  strength     Float
+  pattern      Json
+  lastSeen     DateTime
+  createdAt    DateTime @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("shadow_patterns")
+}
+
+model ShadowAnalysis {
+  id               String    @id @default(cuid())
+  runId            String    @unique
+  visibleSignal    Json
+  shadowAnalysis   Json
+  intentVector     Json
+  beneficiaries    Json
+  predictedChanges Json
+  trajectory       Json
+  trackedAt        DateTime  @default(now())
+
+  // Relations
+  run              Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@map("shadow_analyses")
+}
+
+// =============================================================================
+// SYSTEM HEALTH + MONITORING
+// =============================================================================
+
+model HealthCheck {
+  id        String    @id @default(cuid())
+  service   String
+  status    String
+  message   String?
+  timestamp DateTime  @default(now())
+
+  @@map("health_checks")
+}
+
+// =============================================================================
+// AUDIT EXPORTS
+// =============================================================================
+
+model AuditExport {
+  id          String    @id @default(cuid())
+  orgId       String
+  format      String    // json, csv, pdf
+  status      String    // pending, processing, completed, failed
+  filePath    String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("audit_exports")
+}
+
+// =============================================================================
+// CARBON CREDITS
+// =============================================================================
+
+model CarbonCredit {
+  id          String    @id @default(cuid())
+  orgId       String
+  amount      Float
+  source      String
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("carbon_credits")
+}
+
+// =============================================================================
+// ROUTING POLICIES
+// =============================================================================
+
+model RoutingPolicy {
+  id            String   @id @default(cuid())
+  orgId         String
+  name          String
+  provider      String
+  regions       String[]
+  constraints   Json
+  weights       Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@map("routing_policies")
+}

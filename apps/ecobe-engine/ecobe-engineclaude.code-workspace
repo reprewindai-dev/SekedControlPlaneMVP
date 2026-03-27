@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../ecobe-dashboardclaude"
+		}
+	],
+	"settings": {
+		"git.ignoreLimitWarning": true
+	}
+}

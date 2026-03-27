@@ -1,0 +1,53 @@
+name: EIA Data Ingestion
+
+# Trigger EIA-930 signal fetch by calling the live CI routing endpoint
+# Frequency: Every 4 hours
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+
+env:
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  ingest-eia:
+    name: Ingest EIA Fuel Mix Data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify engine is up
+        run: curl -sf "${ECOBE_ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+
+      - name: Fetch signal - us-east-1
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-east-1"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Fetch signal - us-east-2
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-east-2"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Fetch signal - us-west-1
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-west-1"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Fetch signal - us-west-2
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-west-2"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Confirm health
+        run: curl -sf "${ECOBE_ENGINE_URL}/health" && echo "EIA ingest cycle complete"

@@ -1,0 +1,68 @@
+name: Warm Cache
+
+# Pre-populate signal cache by routing all supported regions through CI routing
+# Each routing call fetches live provider signals which are cached in Redis
+# Frequency: Every 2 hours
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+env:
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  warm-cache:
+    name: Warm Signal Cache
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify engine is up
+        run: curl -sf "${ECOBE_ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+
+      - name: Warm - us-east-1
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-east-1"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Warm - us-east-2
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-east-2"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Warm - us-west-2
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-west-2"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Warm - eu-west-1
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["eu-west-1"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Warm - eu-central-1
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["eu-central-1"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Warm - ap-southeast-1
+        run: |
+          curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["ap-southeast-1"],"carbonWeight":0.7,"jobType":"standard"}'
+
+      - name: Confirm cache warmed
+        run: curl -sf "${ECOBE_ENGINE_URL}/health" && echo "Cache warming complete"

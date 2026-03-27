@@ -1,0 +1,55 @@
+name: Ollama Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Ollama model name available on the self-hosted runner'
+        required: false
+        default: 'qwen2.5:1.5b'
+      prompt:
+        description: 'Prompt used for the benchmark'
+        required: false
+        default: 'Return a compact JSON object with keys summary and risk. Summary should describe carbon-aware routing in one sentence. Risk should be low, medium, or high.'
+  schedule:
+    - cron: '11 */8 * * *'
+
+jobs:
+  benchmark:
+    runs-on: [self-hosted, Windows, X64, ollama]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run local Ollama benchmark
+        id: benchmark
+        uses: ./.github/actions/ollama-benchmark
+        with:
+          ollama-base-url: ${{ vars.OLLAMA_BASE_URL || 'http://127.0.0.1:11434' }}
+          model: ${{ github.event.inputs.model || vars.OLLAMA_MODEL || 'llama3.2:3b' }}
+          prompt: ${{ github.event.inputs.prompt || vars.OLLAMA_BENCHMARK_PROMPT || 'Return a compact JSON object with keys summary and risk. Summary should describe carbon-aware routing in one sentence. Risk should be low, medium, or high.' }}
+          timeout-seconds: '180'
+
+      - name: Publish benchmark summary
+        shell: powershell
+        run: |
+          @"
+          ## Local Ollama Benchmark
+
+          - Model: `${{ steps.benchmark.outputs.model }}`
+          - Total duration (ms): `${{ steps.benchmark.outputs.total-duration-ms }}`
+          - Eval count: `${{ steps.benchmark.outputs.eval-count }}`
+          - Eval duration (ms): `${{ steps.benchmark.outputs.eval-duration-ms }}`
+          - Prompt eval count: `${{ steps.benchmark.outputs.prompt-eval-count }}`
+          - Prompt eval duration (ms): `${{ steps.benchmark.outputs.prompt-eval-duration-ms }}`
+          - Tokens / second: `${{ steps.benchmark.outputs.tokens-per-second }}`
+          - Response chars: `${{ steps.benchmark.outputs.response-chars }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ollama-benchmark
+          path: ${{ steps.benchmark.outputs.artifact-dir }}
+          if-no-files-found: error

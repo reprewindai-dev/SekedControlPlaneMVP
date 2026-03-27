@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"path": "../../ecobe-engineclaude"
+		},
+		{
+			"path": ".."
+		}
+	],
+	"settings": {
+		"git.ignoreLimitWarning": true
+	}
+}

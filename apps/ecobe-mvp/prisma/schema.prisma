@@ -1,0 +1,372 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  owner
+  admin
+  operator
+  developer
+  auditor
+  readonly
+}
+
+enum ApiKeyStatus {
+  active
+  revoked
+}
+
+enum RunStatus {
+  pending
+  approval_required
+  blocked
+  completed
+  failed
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum BillingStatus {
+  active
+  past_due
+  canceled
+}
+
+model Organization {
+  id              String            @id @default(cuid())
+  name            String
+  slug            String            @unique
+  planTier        String            @default("tier_2")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  projects        Project[]
+  memberships     Membership[]
+  apiKeys         ApiKey[]
+  serviceAccounts ServiceAccount[]
+  policyProfiles  PolicyProfile[]
+  runs            Run[]
+  usageRecords    UsageRecord[]
+  billingAccount  BillingAccount?
+  approvalRequests ApprovalRequest[]
+  alerts          Alert[]
+  auditExports    AuditExport[]
+  complianceReports ComplianceReport[]
+  webhookEndpoints WebhookEndpoint[]
+  webhookDeliveries WebhookDelivery[]
+  runEvents       RunEvent[]
+}
+
+model Project {
+  id            String        @id @default(cuid())
+  organizationId String
+  name          String
+  slug          String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  environments  Environment[]
+  apiKeys       ApiKey[]
+  policyProfiles PolicyProfile[]
+  runs          Run[]
+  usageRecords  UsageRecord[]
+
+  @@unique([organizationId, slug])
+}
+
+model Environment {
+  id         String   @id @default(cuid())
+  projectId  String
+  name       String
+  slug       String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runs       Run[]
+
+  @@unique([projectId, slug])
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  displayName String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           Role
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+}
+
+model ApiKey {
+  id             String        @id @default(cuid())
+  organizationId String
+  projectId      String?
+  name           String
+  prefix         String        @unique
+  keyHash        String        @unique
+  scopes         Json          @default("[]")
+  status         ApiKeyStatus  @default(active)
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  runs           Run[]
+}
+
+model ServiceAccount {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  prefix         String       @unique
+  secretHash     String
+  scopes         Json         @default("[]")
+  status         ApiKeyStatus @default(active)
+  lastUsedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model PolicyProfile {
+  id             String        @id @default(cuid())
+  organizationId String
+  projectId      String?
+  name           String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?      @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  versions       PolicyVersion[]
+}
+
+model PolicyVersion {
+  id              String        @id @default(cuid())
+  policyProfileId String
+  version         Int
+  isActive        Boolean       @default(false)
+  rules           Json
+  createdAt       DateTime      @default(now())
+  policyProfile   PolicyProfile @relation(fields: [policyProfileId], references: [id], onDelete: Cascade)
+  runs            Run[]
+
+  @@unique([policyProfileId, version])
+}
+
+model Run {
+  id               String          @id @default(cuid())
+  organizationId   String
+  projectId        String
+  environmentId    String?
+  apiKeyId         String?
+  policyVersionId  String?
+  correlationId    String          @unique
+  status           RunStatus       @default(pending)
+  inputPayload     Json
+  resultPayload    Json?
+  resultEnvelope   Json?
+  blockedReason    String?
+  approvalRequired Boolean         @default(false)
+  auditId          String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project          Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  environment      Environment?    @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  apiKey           ApiKey?         @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  policyVersion    PolicyVersion?  @relation(fields: [policyVersionId], references: [id], onDelete: SetNull)
+  events           RunEvent[]
+  usageRecords     UsageRecord[]
+  approvalRequest  ApprovalRequest?
+  alerts           Alert[]
+}
+
+model RunEvent {
+  id             String       @id @default(cuid())
+  runId          String
+  organizationId String
+  eventType      String
+  payload        Json
+  signature      String
+  createdAt      DateTime     @default(now())
+  run            Run          @relation(fields: [runId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([runId, createdAt])
+}
+
+model UsageRecord {
+  id             String       @id @default(cuid())
+  organizationId String
+  projectId      String?
+  runId          String?
+  metric         String
+  quantity       Float
+  unit           String
+  amountUsd      Float        @default(0)
+  recordedAt     DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project        Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  run            Run?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
+
+model BillingAccount {
+  id               String         @id @default(cuid())
+  organizationId   String         @unique
+  stripeCustomerId String?
+  status           BillingStatus  @default(active)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscriptions    Subscription[]
+  invoices         Invoice[]
+}
+
+model Subscription {
+  id                     String         @id @default(cuid())
+  billingAccountId       String
+  externalSubscriptionId String?        @unique
+  planTier               String
+  status                 BillingStatus  @default(active)
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean        @default(false)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  billingAccount         BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id                String            @id @default(cuid())
+  billingAccountId  String
+  externalInvoiceId String?           @unique
+  amountDue         Float
+  amountPaid        Float             @default(0)
+  currency          String            @default("USD")
+  status            BillingStatus     @default(active)
+  hostedInvoiceUrl  String?
+  periodStart       DateTime?
+  periodEnd         DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  billingAccount    BillingAccount    @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+  lineItems         InvoiceLineItem[]
+}
+
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Float    @default(1)
+  unitAmount  Float    @default(0)
+  amount      Float    @default(0)
+  currency    String   @default("USD")
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEndpoint {
+  id             String       @id @default(cuid())
+  organizationId String
+  url            String
+  secretHash     String
+  encryptedSecret String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries     WebhookDelivery[]
+}
+
+model WebhookDelivery {
+  id                String           @id @default(cuid())
+  organizationId    String
+  webhookEndpointId String?
+  provider          String           @default("internal")
+  providerEventId   String?
+  eventType         String
+  status            String
+  responseCode      Int?
+  requestBody       Json?
+  responseBody      Json?
+  processedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  webhookEndpoint   WebhookEndpoint? @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+model ApprovalRequest {
+  id             String         @id @default(cuid())
+  organizationId String
+  runId          String         @unique
+  status         ApprovalStatus @default(pending)
+  reason         String
+  createdAt      DateTime       @default(now())
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  run            Run            @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
+
+model Alert {
+  id             String       @id @default(cuid())
+  organizationId String
+  runId          String?
+  severity       String
+  message        String
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  run            Run?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+}
+
+model AuditExport {
+  id             String       @id @default(cuid())
+  organizationId String
+  runId          String?
+  format         String
+  status         String
+  filters        Json         @default("{}")
+  artifact       Json?
+  checksum       String?
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}
+
+model ComplianceReport {
+  id             String       @id @default(cuid())
+  organizationId String
+  reportType     String
+  status         String
+  framework      String       @default("seked_control_plane")
+  summary        Json         @default("{}")
+  findings       Json         @default("[]")
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+}

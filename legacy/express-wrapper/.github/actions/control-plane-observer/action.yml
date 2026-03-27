@@ -1,0 +1,94 @@
+name: 'Seked Control Plane Observer'
+description: 'Collect live health, usage, analytics summary, and provider baseline data from the deployed Seked control plane'
+
+inputs:
+  base-url:
+    description: 'Deployed Seked control plane base URL'
+    required: true
+  api-key:
+    description: 'Bearer API key for the Seked control plane'
+    required: true
+  analytics-limit:
+    description: 'Number of recent runs to include in analytics summary'
+    required: false
+    default: '50'
+  usage-days:
+    description: 'Trailing window in days for usage aggregation'
+    required: false
+    default: '30'
+  provider-days:
+    description: 'Trailing window in days for provider baseline analytics'
+    required: false
+    default: '30'
+
+outputs:
+  health-status:
+    description: 'Health status returned by the control plane'
+    value: ${{ steps.observe.outputs.health-status }}
+  total-runs:
+    description: 'Total runs in analytics summary window'
+    value: ${{ steps.observe.outputs.total-runs }}
+  completed-runs:
+    description: 'Completed runs in analytics summary window'
+    value: ${{ steps.observe.outputs.completed-runs }}
+  failed-runs:
+    description: 'Failed runs in analytics summary window'
+    value: ${{ steps.observe.outputs.failed-runs }}
+  avg-quality-score:
+    description: 'Average quality score across completed runs'
+    value: ${{ steps.observe.outputs.avg-quality-score }}
+  avg-routing-latency-ms:
+    description: 'Average routing latency in milliseconds'
+    value: ${{ steps.observe.outputs.avg-routing-latency-ms }}
+  avg-routing-cost-usd:
+    description: 'Average routing cost in USD'
+    value: ${{ steps.observe.outputs.avg-routing-cost-usd }}
+  provider-count:
+    description: 'Number of providers in provider analytics output'
+    value: ${{ steps.observe.outputs.provider-count }}
+  artifact-dir:
+    description: 'Directory containing the collected JSON payloads'
+    value: ${{ steps.observe.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: observe
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        function Get-Value($value, $defaultValue) {
+          if ($null -eq $value) { return $defaultValue }
+          if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $defaultValue }
+          return $value
+        }
+
+        $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
+        $apiKey = '${{ inputs.api-key }}'
+        $headers = @{ Authorization = "Bearer $apiKey" }
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'seked-control-plane-observer'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+        $usageFrom = (Get-Date).ToUniversalTime().AddDays(-[int]'${{ inputs.usage-days }}').ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+        $health = Invoke-RestMethod -Method Get -Uri "$baseUrl/health"
+        $health | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'health.json') -Encoding utf8
+
+        $summary = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/runs/analytics/summary?limit=${{ inputs.analytics-limit }}"
+        $summary | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'analytics-summary.json') -Encoding utf8
+
+        $usage = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/usage?from=$usageFrom"
+        $usage | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'usage.json') -Encoding utf8
+
+        $providers = Invoke-RestMethod -Method Get -Headers $headers -Uri "$baseUrl/runs/analytics/providers?days=${{ inputs.provider-days }}"
+        $providers | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'provider-analytics.json') -Encoding utf8
+
+        "health-status=$(Get-Value $health.status 'unknown')" >> $env:GITHUB_OUTPUT
+        "total-runs=$(Get-Value $summary.totals.runs 0)" >> $env:GITHUB_OUTPUT
+        "completed-runs=$(Get-Value $summary.totals.completed 0)" >> $env:GITHUB_OUTPUT
+        "failed-runs=$(Get-Value $summary.totals.failed 0)" >> $env:GITHUB_OUTPUT
+        "avg-quality-score=$(Get-Value $summary.averages.qualityScore 0)" >> $env:GITHUB_OUTPUT
+        "avg-routing-latency-ms=$(Get-Value $summary.averages.routingLatencyMs 0)" >> $env:GITHUB_OUTPUT
+        "avg-routing-cost-usd=$(Get-Value $summary.averages.routingCostUsd 0)" >> $env:GITHUB_OUTPUT
+        "provider-count=$(Get-Value $providers.totals.providers 0)" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT

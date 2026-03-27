@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seked Stability Stack - The Reliability Layer for AGI</title>
+    <meta name="description" content="A unified architecture for continuous learning, long-horizon planning, and consistent intelligence—built on ancient proportional engineering and collapse-prevention principles.">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            overflow-x: hidden;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 100px 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>');
+            opacity: 0.3;
+        }
+        
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+        
+        .hero h1 {
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+            font-weight: 700;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .hero .subtitle {
+            font-size: 1.5rem;
+            margin-bottom: 30px;
+            opacity: 0.9;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .hero .originator {
+            font-size: 1rem;
+            opacity: 0.8;
+            margin-bottom: 40px;
+        }
+        
+        .cta-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 14px 32px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s;
+            display: inline-block;
+        }
+        
+        .btn-primary {
+            background: white;
+            color: #667eea;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        }
+        
+        .btn-secondary {
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+        }
+        
+        /* Problem Section */
+        .problem {
+            padding: 80px 0;
+            background: #f8f9fa;
+        }
+        
+        .section-title {
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 60px;
+            color: #333;
+        }
+        
+        .gaps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 40px;
+            margin-bottom: 60px;
+        }
+        
+        .gap-card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            border-left: 4px solid #dc3545;
+        }
+        
+        .gap-card h3 {
+            color: #dc3545;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .gap-card p {
+            color: #666;
+            line-height: 1.7;
+        }
+        
+        /* Thesis Section */
+        .thesis {
+            padding: 80px 0;
+            background: white;
+        }
+        
+        .thesis-content {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        
+        .thesis h2 {
+            font-size: 2rem;
+            margin-bottom: 30px;
+            color: #667eea;
+        }
+        
+        .thesis p {
+            font-size: 1.2rem;
+            color: #555;
+            margin-bottom: 30px;
+            line-height: 1.8;
+        }
+        
+        /* Framework Section */
+        .framework {
+            padding: 80px 0;
+            background: #f8f9fa;
+        }
+        
+        .modules-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 30px;
+            margin-bottom: 60px;
+        }
+        
+        .module-card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            text-align: center;
+            transition: transform 0.3s;
+        }
+        
+        .module-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .module-number {
+            width: 50px;
+            height: 50px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin: 0 auto 20px;
+            font-size: 1.2rem;
+        }
+        
+        .module-card h3 {
+            margin-bottom: 15px;
+            color: #333;
+            font-size: 1.2rem;
+        }
+        
+        .module-card p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+        
+        /* Seked Principle Section */
+        .seked-principle {
+            padding: 80px 0;
+            background: white;
+        }
+        
+        .principle-content {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .principle-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 60px;
+            align-items: center;
+            margin-bottom: 60px;
+        }
+        
+        .principle-text h3 {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+        
+        .principle-text p {
+            color: #555;
+            margin-bottom: 20px;
+            line-height: 1.7;
+        }
+        
+        .principle-visual {
+            background: #f8f9fa;
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        
+        .triangle {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto;
+            position: relative;
+        }
+        
+        .triangle::before {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: 100px solid transparent;
+            border-right: 100px solid transparent;
+            border-bottom: 173px solid #667eea;
+        }
+        
+        .triangle-label {
+            position: absolute;
+            bottom: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-weight: 600;
+            color: #333;
+        }
+        
+        /* Benefits Section */
+        .benefits {
+            padding: 80px 0;
+            background: #f8f9fa;
+        }
+        
+        .benefits-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 40px;
+        }
+        
+        .benefit-card {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            border-left: 4px solid #28a745;
+        }
+        
+        .benefit-card h3 {
+            color: #28a745;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .benefit-card p {
+            color: #666;
+            line-height: 1.7;
+        }
+        
+        /* Credibility Section */
+        .credibility {
+            padding: 80px 0;
+            background: white;
+        }
+        
+        .timestamp {
+            text-align: center;
+            font-size: 1.1rem;
+            color: #666;
+            margin-bottom: 40px;
+        }
+        
+        .timestamp strong {
+            color: #333;
+        }
+        
+        .proof-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .proof-item {
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .proof-item h4 {
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+        
+        .proof-item p {
+            color: #666;
+            font-size: 0.95rem;
+        }
+        
+        /* Contact Section */
+        .contact {
+            padding: 80px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-align: center;
+        }
+        
+        .contact h2 {
+            margin-bottom: 30px;
+            font-size: 2rem;
+        }
+        
+        .contact p {
+            margin-bottom: 40px;
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .contact-links {
+            display: flex;
+            gap: 30px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .contact-link {
+            color: white;
+            text-decoration: none;
+            font-weight: 600;
+            padding: 12px 24px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 8px;
+            transition: all 0.3s;
+        }
+        
+        .contact-link:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(255,255,255,0.5);
+        }
+        
+        /* Footer */
+        .footer {
+            padding: 40px 0;
+            background: #333;
+            color: white;
+            text-align: center;
+        }
+        
+        .footer p {
+            opacity: 0.8;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+            
+            .hero .subtitle {
+                font-size: 1.2rem;
+            }
+            
+            .principle-grid {
+                grid-template-columns: 1fr;
+                gap: 40px;
+            }
+            
+            .section-title {
+                font-size: 2rem;
+            }
+            
+            .cta-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1>Seked Stability Stack</h1>
+                <p class="subtitle">The Reliability Layer for AGI - Ancient Egyptian Engineering Meets Modern AI Governance</p>
+                <p class="originator">Originated by ShortFormFactory • February 18, 2026</p>
+                <div class="cta-buttons">
+                    <a href="seked_stack_demo.html" class="btn btn-primary">Try Live Demo</a>
+                    <a href="#framework" class="btn btn-secondary">Learn More</a>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Problem Section -->
+    <section class="problem" id="problem">
+        <div class="container">
+            <h2 class="section-title">The Three Hassabis Gaps</h2>
+            <div class="gaps-grid">
+                <div class="gap-card">
+                    <h3>Gap 1: Continuous Learning</h3>
+                    <p>Current AI systems cannot continuously learn without catastrophic forgetting. They require expensive retraining and lose knowledge between updates.</p>
+                </div>
+                <div class="gap-card">
+                    <h3>Gap 2: Long-Horizon Planning</h3>
+                    <p>AI systems struggle with planning beyond short contexts. They cannot maintain coherent strategies across extended timeframes or multiple sessions.</p>
+                </div>
+                <div class="gap-card">
+                    <h3>Gap 3: Consistent Intelligence</h3>
+                    <p>Without persistent memory and governance, AI behavior drifts over time. There's no mechanism to ensure alignment with core principles across interactions.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Thesis Section -->
+    <section class="thesis" id="thesis">
+        <div class="container">
+            <div class="thesis-content">
+                <h2>Our Thesis: Persistent Signal Field</h2>
+                <p>The solution is a persistent coherence substrate that maintains signal integrity across time, context, and scale. Like the ancient Egyptian seked system that ensured perfect pyramid proportions, our stack maintains perfect AI alignment through three governance layers.</p>
+                <p>By treating AI decisions as structural elements that must obey proportional constraints, we prevent the empire collapse patterns that plague current systems.</p>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Framework Section -->
+    <section class="framework" id="framework">
+        <div class="container">
+            <h2 class="section-title">Five-Module Framework</h2>
+            <div class="modules-grid">
+                <div class="module-card">
+                    <div class="module-number">1</div>
+                    <h3>Seked Signal Governance</h3>
+                    <p>Fracture analysis, detrimental scoring, and tiered escalation based on ancient proportional engineering principles</p>
+                </div>
+                <div class="module-card">
+                    <div class="module-number">2</div>
+                    <h3>ConvergeOS</h3>
+                    <p>Bounded retry loops with schema validation and quality thresholds ensuring output convergence</p>
+                </div>
+                <div class="module-card">
+                    <div class="module-number">3</div>
+                    <h3>ECOBE</h3>
+                    <p>Carbon-aware routing with weighted region selection for optimal execution</p>
+                </div>
+                <div class="module-card">
+                    <div class="module-number">4</div>
+                    <h3>Signal Field</h3>
+                    <p>Persistent coherence substrate maintaining reference stars, intent vectors, and trust weights</p>
+                </div>
+                <div class="module-card">
+                    <div class="module-number">5</div>
+                    <h3>Watchtower</h3>
+                    <p>Consensus validation and smoke-relay summaries for continuity preservation</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Seked Principle Section -->
+    <section class="seked-principle">
+        <div class="container">
+            <div class="principle-content">
+                <h2 class="section-title">The Seked Principle</h2>
+                <div class="principle-grid">
+                    <div class="principle-text">
+                        <h3>Perfect Proportions Prevent Collapse</h3>
+                        <p>Ancient Egyptian builders used the seked system to maintain perfect pyramid proportions. This prevented structural failure and ensured monuments stood for millennia.</p>
+                        <p>Our AI governance applies the same principle: maintain perfect proportions between capability, control, and context to prevent systemic collapse.</p>
+                        <p>Every decision is measured against reference stars (protected invariants), ensuring the AI structure remains stable regardless of scale or complexity.</p>
+                    </div>
+                    <div class="principle-visual">
+                        <div class="triangle"></div>
+                        <p class="triangle-label">Stable Triangle Geometry</p>
+                        <p style="margin-top: 60px; color: #666;">Like the 3-4-5 triangle that ensured Egyptian pyramids were perfectly square, our three-layer governance ensures AI decisions are perfectly aligned.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Benefits Section -->
+    <section class="benefits">
+        <div class="container">
+            <h2 class="section-title">Key Benefits</h2>
+            <div class="benefits-grid">
+                <div class="benefit-card">
+                    <h3>Continuous Learning</h3>
+                    <p>Signal Field persistence enables learning without forgetting. Intent vectors track evolution while reference stars maintain core alignment.</p>
+                </div>
+                <div class="benefit-card">
+                    <h3>Long-Horizon Planning</h3>
+                    <p>Smoke-relay summaries compress continuity across time, enabling coherent strategies that span sessions and contexts.</p>
+                </div>
+                <div class="benefit-card">
+                    <h3>Consistent Intelligence</h3>
+                    <p>Three-layer governance ensures every decision respects proportional constraints, preventing drift and maintaining reliability.</p>
+                </div>
+                <div class="benefit-card">
+                    <h3>Collapse Prevention</h3>
+                    <p>Fracture analysis detects empire collapse patterns before they manifest, enabling proactive mitigation.</p>
+                </div>
+                <div class="benefit-card">
+                    <h3>Carbon Awareness</h3>
+                    <p>ECOBE routing minimizes environmental impact while maintaining performance and cost efficiency.</p>
+                </div>
+                <div class="benefit-card">
+                    <h3>Proven Architecture</h3>
+                    <p>Built on principles that have withstood 4,500 years of testing - the seked system of ancient Egypt.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Credibility Section -->
+    <section class="credibility">
+        <div class="container">
+            <h2 class="section-title">Timestamped Proof of Origin</h2>
+            <p class="timestamp">First documented: <strong>February 18, 2026 at 1:26 PM UTC</strong></p>
+            <div class="proof-items">
+                <div class="proof-item">
+                    <h4>Whitepaper</h4>
+                    <p>Complete technical specification with formal proofs and architectural diagrams</p>
+                </div>
+                <div class="proof-item">
+                    <h4>Working Demo</h4>
+                    <p>Functional implementation demonstrating all three governance layers in action</p>
+                </div>
+                <div class="proof-item">
+                    <h4>Implementation Guide</h4>
+                    <p>Step-by-step build instructions for production deployment</p>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Contact Section -->
+    <section class="contact">
+        <div class="container">
+            <h2>Ready to Build the Future?</h2>
+            <p>We're seeking collaborators, researchers, and forward-thinking organizations to help scale the Seked Stability Stack.</p>
+            <div class="contact-links">
+                <a href="mailto:contact@shortformfactory.com" class="contact-link">Email Us</a>
+                <a href="#" class="contact-link">Schedule Call</a>
+                <a href="seked_stack_demo.html" class="contact-link">View Demo</a>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2026 ShortFormFactory. Seked Stability Stack - Originated February 18, 2026.</p>
+        </div>
+    </footer>
+    
+    <script>
+        // Smooth scrolling for anchor links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+        
+        // Add scroll effect to header
+        let lastScroll = 0;
+        window.addEventListener('scroll', () => {
+            const currentScroll = window.pageYOffset;
+            const hero = document.querySelector('.hero');
+            
+            if (hero) {
+                if (currentScroll > 100) {
+                    hero.style.transform = `translateY(-${currentScroll * 0.5}px)`;
+                    hero.style.opacity = 1 - (currentScroll / 500);
+                } else {
+                    hero.style.transform = 'translateY(0)';
+                    hero.style.opacity = 1;
+                }
+            }
+            
+            lastScroll = currentScroll;
+        });
+        
+        // Animate elements on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+        
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.opacity = '1';
+                    entry.target.style.transform = 'translateY(0)';
+                }
+            });
+        }, observerOptions);
+        
+        // Observe all cards
+        document.querySelectorAll('.gap-card, .module-card, .benefit-card').forEach(card => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(30px)';
+            card.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+            observer.observe(card);
+        });
+    </script>
+</body>
+</html>

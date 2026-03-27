@@ -1,0 +1,94 @@
+name: 'Provider Baseline Bootstrap'
+description: 'Seed or update a provider-region baseline in the Seked control plane from an external benchmark observation'
+
+inputs:
+  base-url:
+    description: 'Deployed Seked control plane base URL'
+    required: true
+  api-key:
+    description: 'Bearer API key for the Seked control plane'
+    required: true
+  provider:
+    description: 'Provider identifier'
+    required: true
+  region:
+    description: 'Routing region identifier'
+    required: true
+  observed-latency-ms:
+    description: 'Observed latency in milliseconds'
+    required: true
+  observed-cost-usd:
+    description: 'Observed cost in USD'
+    required: true
+  observed-carbon-intensity-gco2kwh:
+    description: 'Observed carbon intensity override'
+    required: false
+    default: ''
+  metadata-json:
+    description: 'Optional JSON metadata object'
+    required: false
+    default: '{}'
+
+outputs:
+  sample-count:
+    description: 'Updated baseline sample count'
+    value: ${{ steps.bootstrap.outputs.sample-count }}
+  avg-latency-ms:
+    description: 'Updated average latency'
+    value: ${{ steps.bootstrap.outputs.avg-latency-ms }}
+  avg-cost-usd:
+    description: 'Updated average cost'
+    value: ${{ steps.bootstrap.outputs.avg-cost-usd }}
+  avg-carbon-intensity-gco2kwh:
+    description: 'Updated average carbon intensity'
+    value: ${{ steps.bootstrap.outputs.avg-carbon-intensity-gco2kwh }}
+  artifact-dir:
+    description: 'Directory containing request and response JSON'
+    value: ${{ steps.bootstrap.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: bootstrap
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        function Get-Value($value, $defaultValue) {
+          if ($null -eq $value) { return $defaultValue }
+          if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $defaultValue }
+          return $value
+        }
+
+        $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
+        $apiKey = '${{ inputs.api-key }}'
+        $headers = @{
+          Authorization = "Bearer $apiKey"
+          'Content-Type' = 'application/json'
+        }
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'provider-baseline-bootstrap'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+        $metadata = '${{ inputs.metadata-json }}' | ConvertFrom-Json
+        $payload = @{
+          provider = '${{ inputs.provider }}'
+          region = '${{ inputs.region }}'
+          observedLatencyMs = [double]'${{ inputs.observed-latency-ms }}'
+          observedCostUsd = [double]'${{ inputs.observed-cost-usd }}'
+          metadata = $metadata
+        }
+        if (-not [string]::IsNullOrWhiteSpace('${{ inputs.observed-carbon-intensity-gco2kwh }}')) {
+          $payload.observedCarbonIntensityGco2Kwh = [double]'${{ inputs.observed-carbon-intensity-gco2kwh }}'
+        }
+
+        $payloadPath = Join-Path $artifactDir 'payload.json'
+        $payloadJson = $payload | ConvertTo-Json -Depth 20
+        $payloadJson | Set-Content -Path $payloadPath -Encoding utf8
+
+        $response = Invoke-RestMethod -Method Post -Uri "$baseUrl/runs/analytics/providers/bootstrap" -Headers $headers -Body $payloadJson
+        $response | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'response.json') -Encoding utf8
+
+        "sample-count=$(Get-Value $response.baseline.sampleCount 0)" >> $env:GITHUB_OUTPUT
+        "avg-latency-ms=$(Get-Value $response.baseline.avgLatencyMs 0)" >> $env:GITHUB_OUTPUT
+        "avg-cost-usd=$(Get-Value $response.baseline.avgCostUsd 0)" >> $env:GITHUB_OUTPUT
+        "avg-carbon-intensity-gco2kwh=$(Get-Value $response.baseline.avgCarbonIntensityGco2Kwh 0)" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT

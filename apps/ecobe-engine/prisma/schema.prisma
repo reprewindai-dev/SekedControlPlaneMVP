@@ -1,0 +1,1331 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["tracing"]
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+// ============================================================================
+// CARBON INTENSITY DATA
+// ============================================================================
+
+model CarbonIntensity {
+  id        String   @id @default(cuid())
+
+  region    String   // e.g., "US-CAL-CISO", "FR", "DE"
+
+  // Carbon metrics
+  carbonIntensity      Int      // gCO2eq/kWh
+  fossilFuelPercentage Float?
+  renewablePercentage  Float?
+
+  // Source
+  source    String   @default("ELECTRICITY_MAPS")
+
+  // Timestamp
+  timestamp DateTime
+
+  // Metadata
+  isEstimated Boolean  @default(false)
+  metadata    Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([region, timestamp])
+  @@index([timestamp])
+  @@unique([region, timestamp], name: "region_timestamp")
+  @@unique([region, timestamp, source], name: "region_timestamp_source")
+}
+
+// ============================================================================
+// WORKLOAD ROUTING
+// ============================================================================
+
+model WorkloadRequest {
+  id        String   @id @default(cuid())
+
+  // Request details
+  requestVolume Int
+  workloadType  String   // "inference", "training", "batch"
+  modelSize     String?  // "mixtral-70b", "llama-3-8b", etc.
+
+  // Routing
+  regionTargets String[] // Preferred regions
+
+  // Constraints
+  carbonBudget     Float?  // Max gCO2eq allowed
+  deadlineStart    DateTime?
+  deadlineEnd      DateTime?
+  maxLatencyMs     Int?
+
+  // Hardware mix (optional)
+  hardwareCpu      Float?  @default(0.6)
+  hardwareGpu      Float?  @default(0.3)
+  hardwareTpu      Float?  @default(0.1)
+
+  // Results
+  selectedRegion   String?
+  estimatedCO2     Float?
+  actualCO2        Float?
+
+  // Status
+  status    WorkloadStatus @default(PENDING)
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+
+  routingDecisions RoutingDecision[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum WorkloadStatus {
+  PENDING
+  ROUTED
+  EXECUTING
+  COMPLETED
+  FAILED
+}
+
+model RoutingDecision {
+  id        String   @id @default(cuid())
+
+  workloadRequestId String
+  workloadRequest   WorkloadRequest @relation(fields: [workloadRequestId], references: [id], onDelete: Cascade)
+
+  region            String
+  rank              Int      // 1 = best choice
+
+  // Metrics at decision time
+  carbonIntensity   Int      // gCO2eq/kWh
+  estimatedCO2      Float    // Total gCO2eq
+  estimatedLatency  Int?     // ms
+  estimatedCost     Float?   // USD
+
+  // Score components
+  carbonScore       Float
+  latencyScore      Float
+  costScore         Float
+  overallScore      Float
+
+  selected          Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([workloadRequestId])
+  @@index([region])
+}
+
+model DashboardRoutingDecision {
+  id        String   @id @default(cuid())
+
+  createdAt DateTime @default(now())
+
+  workloadName String?
+  opName       String?
+
+  baselineRegion String
+  chosenRegion   String
+
+  zoneBaseline String?
+  zoneChosen   String?
+
+  carbonIntensityBaselineGPerKwh Int?
+  carbonIntensityChosenGPerKwh   Int?
+
+  estimatedKwh Float?
+  co2BaselineG Float?
+  co2ChosenG   Float?
+
+  reason String?
+
+  latencyEstimateMs Int?
+  latencyActualMs   Int?
+
+  fallbackUsed        Boolean @default(false)
+  dataFreshnessSeconds Int?
+  requestCount         Int   @default(1)
+
+  // Grid signal fields for replay/audit
+  balancingAuthority String?
+  demandRampPct Float?
+  carbonSpikeProbability Float?
+  curtailmentProbability Float?
+  importCarbonLeakageScore Float?
+
+  // Provenance fields
+  sourceUsed String?
+  validationSource String?
+  referenceTime DateTime?
+  disagreementFlag Boolean?
+  disagreementPct Float?
+  estimatedFlag Boolean?
+  syntheticFlag Boolean?
+
+  meta Json @default("{}")
+
+  @@index([createdAt])
+  @@index([baselineRegion])
+  @@index([chosenRegion])
+}
+
+// ============================================================================
+// CARBON COMMAND (Decision Engine)
+// ============================================================================
+
+model CarbonCommand {
+  id        String   @id @default(cuid())
+
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  requestPayload Json
+
+  workloadType  String?
+  modelFamily   String?
+  executionMode String?
+
+  mode      CarbonCommandMode   @default(IMMEDIATE)
+  status    CarbonCommandStatus @default(PENDING)
+
+  candidateWindowHours Int?
+  allowTimeShifting    Boolean  @default(true)
+  allowCrossRegion     Boolean  @default(true)
+  requireCreditCoverage Boolean @default(false)
+
+  selectedRegion        String?
+  selectedStartAt       DateTime?
+  fallbackRegion        String?
+  expectedCarbonIntensity Int?
+  expectedLatencyMs     Int?
+  expectedCostIndex     Float?
+  estimatedEmissionsKgCo2e Float?
+  estimatedSavingsKgCo2e Float?
+  confidence            Float?
+
+  // Grid signal intelligence
+  balancingAuthority     String?
+  demandRampPct         Float?
+  carbonSpikeProbability Float?
+  curtailmentProbability Float?
+  importCarbonLeakageScore Float?
+
+  summaryReason   String?
+  tradeoffSummary String?
+
+  decisionId      String?
+
+  metadata Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trace    CarbonCommandTrace?
+  outcomes CarbonCommandOutcome[]
+  embeddingIndex WorkloadEmbeddingIndex? @relation("CarbonCommandEmbedding")
+  adaptiveRun    AdaptiveRunLog?         @relation("CarbonCommandAdaptiveRun")
+
+  @@index([orgId])
+  @@index([mode])
+  @@index([status])
+  @@index([selectedRegion])
+  @@index([workloadType])
+  @@index([modelFamily])
+}
+
+model CarbonCommandTrace {
+  id        String   @id @default(cuid())
+
+  commandId String   @unique
+  command   CarbonCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  scoringModel   String
+  weights        Json
+  inputs         Json
+  environment    Json
+  candidates     Json
+  rejected       Json
+  selection      Json
+  traceJson      Json
+
+  createdAt DateTime @default(now())
+}
+
+model CarbonCommandOutcome {
+  id        String   @id @default(cuid())
+
+  commandId String   @unique
+  command   CarbonCommand @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  actualRegion          String
+  actualStartAt         DateTime
+  actualEndAt           DateTime?
+  actualLatencyMs       Int?
+  actualGpuHours        Float?
+  actualCpuHours        Float?
+  actualMemoryGb        Float?
+  actualCarbonIntensity Float?
+  actualEmissionsKgCo2e Float?
+  actualCostUsd         Float?
+  costIndexObserved     Float?
+
+  measurementSource CarbonMeasurementSource @default(ESTIMATED)
+  providerExecutionId String? @unique
+
+  predictedEmissionsKgCo2e Float?
+  predictedLatencyMs       Int?
+  predictedCostIndex       Float?
+
+  // Grid signal intelligence at execution time
+  actualBalancingAuthority     String?
+  actualDemandRampPct         Float?
+  actualCarbonSpikeProbability Float?
+  actualCurtailmentProbability Float?
+  actualImportCarbonLeakageScore Float?
+
+  emissionsVarianceKg   Float?
+  emissionsVariancePct  Float?
+  latencyVarianceMs     Int?
+  latencyVariancePct    Float?
+  costVariancePct       Float?
+  regionMatch           Boolean @default(false)
+  slaMet                Boolean?
+  fallbackTriggered     Boolean? @default(false)
+  completed             Boolean  @default(false)
+  predictionQuality     PredictionQuality @default(MEDIUM)
+
+  comparisonJson Json @default("{}")
+  learningSignals Json @default("{}")
+  metadata        Json @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([actualRegion])
+}
+
+enum CarbonCommandMode {
+  IMMEDIATE
+  SCHEDULED
+  ADVISORY
+}
+
+enum CarbonCommandStatus {
+  PENDING
+  RECOMMENDED
+  EXECUTED
+  FAILED
+}
+
+enum CarbonMeasurementSource {
+  ESTIMATED
+  PROVIDER_REPORTED
+  METERED
+}
+
+enum PredictionQuality {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+// ============================================================================
+// ORGANIZATIONS & USAGE
+// ============================================================================
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum OrgPlanTier {
+  FREE
+  GROWTH
+  ENTERPRISE
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  apiKey    String   @unique
+  billingEmail String?
+  planTier  OrgPlanTier        @default(FREE)
+  status    OrganizationStatus @default(ACTIVE)
+  monthlyCommandLimit Int      @default(1000)
+  enforceCreditCoverage Boolean @default(false)
+  featureFlags Json    @default("{}")
+  proofRetentionDays Int @default(30)
+  metadata  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  commands CarbonCommand[]
+  outcomes CarbonCommandOutcome[]
+  usageCounters OrgUsageCounter[]
+}
+
+model OrgUsageCounter {
+  id        String   @id @default(cuid())
+  orgId     String
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  periodStart DateTime
+  commandCount Int    @default(0)
+  estimatedEmissionsKg Float @default(0)
+  lastCommandAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, periodStart])
+  @@index([orgId])
+}
+
+// ============================================================================
+// CARBON COMMAND ACCURACY (Daily Aggregates)
+// ============================================================================
+
+model CarbonCommandAccuracyDaily {
+  id        String   @id @default(cuid())
+
+  date DateTime
+  orgId String
+  workloadType String?
+  region       String?
+
+  totalCommands          Int    @default(0)
+  regionMatchCount       Int    @default(0)
+  avgEmissionsVariancePct Float  @default(0)
+  avgLatencyVariancePct   Float  @default(0)
+  avgCostVariancePct      Float  @default(0)
+  highQualityCount       Int    @default(0)
+  mediumQualityCount     Int    @default(0)
+  lowQualityCount        Int    @default(0)
+  estimatedSavingsKgCo2e  Float  @default(0)
+  verifiedSavingsKgCo2e   Float  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, orgId, workloadType, region])
+}
+
+// ============================================================================
+// WORKLOAD EMBEDDING INDEX
+// ============================================================================
+
+model WorkloadEmbeddingIndex {
+  id        String   @id @default(cuid())
+  commandId String   @unique
+  orgId     String
+  vectorId  String?
+
+  workloadType String?
+  modelFamily  String?
+  executionMode String?
+  gpuHoursBucket String?
+  gpuHours     Float?
+  cpuHours     Float?
+  memoryGb     Float?
+  region       String?
+  carbonIntensity Float?
+  emissionsKgCo2e Float?
+  savingsKgCo2e   Float?
+  latencyMs       Int?
+
+  createdAt DateTime @default(now())
+
+  command CarbonCommand @relation("CarbonCommandEmbedding", fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+  @@index([workloadType])
+  @@index([region])
+}
+
+// ============================================================================
+// ADAPTIVE OPTIMIZATION
+// ============================================================================
+
+model AdaptiveProfile {
+  id        String   @id @default(cuid())
+  orgId     String
+  workloadType String?
+  modelFamily  String?
+  region       String?
+
+  weightModifiersJson        Json @default("{}")
+  regionAdjustmentsJson      Json @default("{}")
+  executionModeAdjustmentsJson Json @default("{}")
+  confidenceModifiersJson    Json @default("{}")
+
+  lastUpdatedAt DateTime @default(now())
+
+  @@unique([orgId, workloadType, modelFamily, region])
+}
+
+model AdaptiveSignal {
+  id        String   @id @default(cuid())
+  orgId     String
+  signalType String
+  workloadType String?
+  modelFamily  String?
+  region       String?
+  metric       String
+  value        Float
+  threshold    Float?
+  details      Json   @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@index([orgId])
+  @@index([signalType])
+}
+
+model AdaptiveRunLog {
+  id        String   @id @default(cuid())
+  commandId String   @unique
+  orgId     String
+
+  baseScoreJson       Json @default("{}")
+  adjustmentsJson     Json @default("{}")
+  finalScoreJson      Json @default("{}")
+  reasoningJson       Json @default("{}")
+
+  createdAt DateTime @default(now())
+
+  command CarbonCommand @relation("CarbonCommandAdaptiveRun", fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
+}
+
+// ============================================================================
+// CARBON FORECASTING (ML Model)
+// ============================================================================
+
+model CarbonForecast {
+  id        String   @id @default(cuid())
+
+  region    String
+
+  // Forecast
+  forecastTime      DateTime
+  predictedIntensity Int     // gCO2eq/kWh
+  confidence         Float   // 0.0 - 1.0
+
+  // Model info
+  modelVersion      String  @default("v1.0")
+  features          Json    @default("{}")
+
+  // Actual (for training)
+  actualIntensity   Int?
+  error             Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([region, forecastTime])
+  @@index([forecastTime])
+  @@unique([region, forecastTime], name: "region_forecastTime")
+}
+
+model ForecastRefresh {
+  id        String   @id @default(cuid())
+
+  region    String
+  refreshedAt DateTime @default(now())
+
+  recordsIngested    Int      @default(0)
+  forecastsGenerated Int      @default(0)
+  status             ForecastRefreshStatus @default(SUCCESS)
+  message            String?
+
+  createdAt DateTime @default(now())
+
+  @@index([region, refreshedAt])
+  @@index([refreshedAt])
+}
+
+enum ForecastRefreshStatus {
+  SUCCESS
+  FAILURE
+}
+
+// ============================================================================
+// CARBON CREDITS & TRACKING
+// ============================================================================
+
+model CarbonCredit {
+  id        String   @id @default(cuid())
+
+  organizationId String?
+
+  amountCO2      Float
+  provider       String
+  priceUsd       Float
+  certificateUrl String?
+
+  status     CarbonCreditStatus @default(ACTIVE)
+  purchasedAt DateTime          @default(now())
+  retiredAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([status])
+  @@index([purchasedAt])
+}
+
+enum CarbonCreditStatus {
+  ACTIVE
+  RETIRED
+}
+
+model EmissionLog {
+  id        String   @id @default(cuid())
+
+  organizationId   String?
+  workloadRequestId String?
+
+  emissionCO2 Float
+  offsetCO2   Float @default(0)
+
+  region    String
+  source    String
+  timestamp DateTime
+
+  metadata  Json     @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId])
+  @@index([workloadRequestId])
+  @@index([region, timestamp])
+  @@index([timestamp])
+}
+
+// ============================================================================
+// DEKES INTEGRATION
+// ============================================================================
+
+model DekesWorkload {
+  id        String   @id @default(cuid())
+
+  // DEKES query info
+  dekesQueryId      String?
+  dekesRunId        String?
+  queryString       String?
+
+  // Workload characteristics
+  estimatedQueries  Int
+  estimatedResults  Int
+
+  // Carbon optimization
+  carbonBudget      Float?   // gCO2eq
+  scheduledTime     DateTime?
+
+  // Selected routing
+  selectedRegion    String?
+  actualCO2         Float?
+
+  // Status
+  status            String   @default("PENDING")
+
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([status])
+  @@index([dekesQueryId])
+}
+
+model DekesLeadCandidate {
+  id                       String   @id @default(cuid())
+  candidateId              String   @unique
+  orgId                    String
+  domain                   String
+  company                  String?
+  primaryContactName       String?
+  primaryContactRole       String?
+  primaryContactEmail      String?
+  primaryContactConfidence Float?
+  businessType             String?
+  intentScore              Float
+  icpFitScore              Float
+  sourceSignals            Json     @default("[]")
+  riskFlags                Json     @default("[]")
+  verificationStatus       String
+  confidenceBreakdown      Json     @default("{}")
+  rawAgentFindings         Json     @default("[]")
+  verificationPayload      Json     @default("{}")
+  metadata                 Json     @default("{}")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([domain])
+}
+
+// ============================================================================
+// REGION METADATA
+// ============================================================================
+
+model Region {
+  id        String   @id @default(cuid())
+
+  code      String   @unique  // "US-CAL-CISO", "FR", etc.
+  name      String            // "California", "France"
+  country   String
+
+  // Characteristics
+  typicalLatencyMs  Int?
+  costPerKwh        Float?
+  availableHardware String[] @default([])
+
+  // Grid mix
+  renewableCapacity Float?   // %
+  avgCarbonIntensity Int?    // gCO2eq/kWh
+
+  // Availability
+  enabled   Boolean  @default(true)
+
+  metadata  Json     @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+// ============================================================================
+// ANALYTICS
+// ============================================================================
+
+model DailyMetrics {
+  id        String   @id @default(cuid())
+
+  date      DateTime @unique
+
+  // Workload stats
+  totalWorkloads    Int     @default(0)
+  totalCO2Grams     Float   @default(0)
+  totalEnergyKwh    Float   @default(0)
+
+  // Savings
+  savedCO2Grams     Float   @default(0)  // vs baseline
+  savedCostUsd      Float   @default(0)
+
+  // Avg metrics
+  avgCarbonIntensity Float?
+
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+// ============================================================================
+// INTEGRATION HEALTH METRICS
+// ============================================================================
+
+model IntegrationMetric {
+  id             String   @id @default(cuid())
+
+  source         String   @unique
+  successCount   Int      @default(0)
+  failureCount   Int      @default(0)
+  lastSuccessAt  DateTime?
+  lastFailureAt  DateTime?
+  lastError      String?
+  lastErrorCode  String?
+  lastErrorAt    DateTime?
+  lastLatencyMs  Float?
+  totalLatencyMs Float    @default(0)
+  latencySamples Int      @default(0)
+  latencyP95Ms   Float?
+  alertActive    Boolean  @default(false)
+  alertMessage   String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model IntegrationEvent {
+  id         String   @id @default(cuid())
+  source     String
+  eventType  String?
+  success    Boolean
+  durationMs Float?
+  statusCode Int?
+  errorCode  String?
+  message    String?
+  createdAt  DateTime @default(now())
+
+  @@index([source, createdAt])
+  @@index([source, success, createdAt])
+}
+
+enum IntegrationWebhookSinkStatus {
+  ACTIVE
+  PAUSED
+  DISABLED
+}
+
+model IntegrationWebhookSink {
+  id               String                       @id @default(cuid())
+  name             String
+  targetUrl        String
+  authToken        String?
+  signingSecret    String?
+  status           IntegrationWebhookSinkStatus @default(ACTIVE)
+  metadata         Json                         @default("{}")
+  lastSuccessAt    DateTime?
+  lastFailureAt    DateTime?
+  lastResponseCode Int?
+  lastError        String?
+  createdAt        DateTime                     @default(now())
+  updatedAt        DateTime                     @updatedAt
+
+  outbox DecisionEventOutbox[]
+
+  @@index([status, createdAt])
+}
+
+enum DecisionEventOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  DEAD_LETTER
+}
+
+model DecisionEventOutbox {
+  id               String                    @id @default(cuid())
+  eventType        String
+  eventKey         String                    @unique
+  sinkId           String?
+  sink             IntegrationWebhookSink?   @relation(fields: [sinkId], references: [id], onDelete: SetNull)
+  payload          Json
+  status           DecisionEventOutboxStatus @default(PENDING)
+  attemptCount     Int                       @default(0)
+  nextAttemptAt    DateTime
+  lastResponseCode Int?
+  lastError        String?
+  processedAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([status, nextAttemptAt, createdAt])
+  @@index([sinkId, createdAt])
+}
+
+// ============================================================================
+// WORKLOAD DECISION OUTCOMES
+// ============================================================================
+
+model WorkloadDecisionOutcome {
+  id          String   @id @default(uuid())
+  workloadId  String
+  region      String?
+  carbonSaved Float
+  latency     Float
+  cost        Float
+  success     Boolean
+  createdAt   DateTime @default(now())
+
+  @@index([workloadId])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// GRID SIGNAL INTELLIGENCE LAYER
+// ============================================================================
+
+model GridSignalSnapshot {
+  id        String   @id @default(cuid())
+
+  region    String
+  balancingAuthority String?
+
+  timestamp DateTime
+
+  // Demand and generation
+  demandMwh            Float?
+  demandChangeMwh      Float?
+  demandChangePct      Float?
+  netGenerationMwh     Float?
+  netInterchangeMwh    Float?
+
+  // Fuel mix
+  renewableRatio        Float?
+  fossilRatio          Float?
+
+  // Derived intelligence
+  carbonSpikeProbability Float?
+  curtailmentProbability Float?
+  importCarbonLeakageScore Float?
+
+  // Data quality
+  signalQuality         SignalQuality @default(MEDIUM)
+  estimatedFlag         Boolean @default(false)
+  syntheticFlag         Boolean @default(false)
+
+  // Source
+  source                 String @default("eia930")
+  metadata               Json    @default("{}")
+
+  createdAt DateTime @default(now())
+
+  @@index([region, timestamp])
+  @@index([timestamp])
+  @@unique([region, timestamp, source])
+}
+
+enum SignalQuality {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model Eia930BalanceRaw {
+  id        String   @id @default(cuid())
+
+  period    String
+  respondent String
+  respondentName String
+  type      String
+  value     Float
+  valueUnits String
+
+  region    String
+  balancingAuthority String?
+
+  ingestedAt DateTime @default(now())
+
+  @@index([region, period])
+  @@index([respondent, period])
+}
+
+model Eia930InterchangeRaw {
+  id        String   @id @default(cuid())
+
+  period    String
+  fromBa    String
+  fromBaName String
+  toBa      String
+  toBaName  String
+  type      String
+  value     Float
+  valueUnits String
+
+  region    String
+  balancingAuthority String?
+
+  ingestedAt DateTime @default(now())
+
+  @@index([region, period])
+  @@index([fromBa, period])
+  @@index([toBa, period])
+}
+
+model Eia930SubregionRaw {
+  id        String   @id @default(cuid())
+
+  period    String
+  respondent String
+  respondentName String
+  parent    String
+  parentName String
+  subregion String
+  subregionName String
+  type      String
+  value     Float
+  valueUnits String
+
+  region    String
+  balancingAuthority String?
+
+  ingestedAt DateTime @default(now())
+
+  @@index([region, period])
+  @@index([parent, period])
+  @@index([subregion, period])
+}
+
+// ============================================================================
+// DEKES PROSPECT / HANDOFF TRACKING
+// ============================================================================
+
+model DekesProspect {
+  id                String   @id @default(cuid())
+  externalLeadId    String?
+  externalOrgId     String?
+
+  // Organization info from DEKES
+  orgName           String?
+  orgDomain         String?
+  orgSizeLabel      String?
+  orgRegion         String?
+
+  // Intent signals
+  intentScore       Float?
+  intentReason      String?
+  intentKeywords    Json     @default("[]")
+
+  // Contact
+  contactName       String?
+  contactEmail      String?
+  contactLinkedin   String?
+
+  // Source tracking
+  sourceLeadId      String?
+  sourceQueryId     String?
+  sourceRunId       String?
+
+  // Status: RECEIVED → QUALIFIED → ONBOARDING → CONVERTED → REJECTED
+  status            String   @default("RECEIVED")
+  notes             String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([externalLeadId])
+  @@index([externalOrgId])
+  @@index([status])
+}
+
+model DekesTenant {
+  id                String   @id @default(cuid())
+  externalOrgId     String   @unique
+  organizationName  String
+  ownerEmail        String
+  plan              String   @default("FREE")
+  status            String   @default("ACTIVE")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+}
+
+model DekesDemo {
+  id                String   @id @default(cuid())
+  organizationName  String
+  contactEmail      String
+  workloadSummary   String?
+  priority          String   @default("medium")
+  metadata          Json     @default("{}")
+  status            String   @default("SCHEDULED")
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([contactEmail])
+}
+
+model DekesHandoffEvent {
+  id                String   @id @default(cuid())
+  prospectId        String?
+  externalLeadId    String?
+
+  // Status: PENDING → SENT → ACCEPTED → CONVERTED → FAILED
+  status            String   @default("PENDING")
+  qualificationScore Float?
+  notes             String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([prospectId])
+  @@index([externalLeadId])
+  @@index([status])
+}
+
+// ============================================================================
+// CARBON LEDGER — AUDIT-GRADE ACCOUNTING
+// ============================================================================
+
+model CarbonLedgerEntry {
+  id                    String   @id @default(cuid())
+  orgId                 String
+  commandId             String?
+  decisionFrameId       String?
+
+  // Job classification
+  jobClass              String   @default("realtime") // realtime | soft_deadline | batch
+  workloadType          String?
+
+  // Region routing
+  baselineRegion        String   // Region that WOULD have been used without ECOBE
+  chosenRegion          String   // Region actually routed to
+  baselineStartTs       DateTime?
+  chosenStartTs         DateTime?
+
+  // Carbon accounting — predicted at routing time
+  baselineCarbonGPerKwh Float    // Carbon intensity of baseline region
+  chosenCarbonGPerKwh   Float    // Carbon intensity of chosen region
+  energyEstimateKwh     Float    // Estimated energy consumption
+  baselineCarbonG       Float    // baselineCarbonGPerKwh * energyEstimateKwh
+  chosenCarbonG         Float    // chosenCarbonGPerKwh * energyEstimateKwh
+  carbonSavedG          Float    // baselineCarbonG - chosenCarbonG
+
+  // Carbon accounting — actual (filled post-execution)
+  actualCarbonGPerKwh   Float?
+  actualCarbonG         Float?
+  actualEnergykWh       Float?
+  verifiedSavingsG      Float?
+  accountingMethod      String   @default("flow-traced") // flow-traced | marginal | average
+
+  // Provider provenance
+  sourceUsed            String?
+  validationSource      String?
+  fallbackUsed          Boolean  @default(false)
+  estimatedFlag         Boolean  @default(false)
+  syntheticFlag         Boolean  @default(false)
+
+  // Decision quality
+  confidenceScore       Float?
+  qualityTier           String?  // high | medium | low
+  forecastStability     String?  // stable | medium | unstable
+  disagreementFlag      Boolean  @default(false)
+  disagreementPct       Float?
+
+  // Grid intelligence at decision time
+  balancingAuthority    String?
+  demandRampPct         Float?
+  carbonSpikeProbability Float?
+  curtailmentProbability Float?
+  importCarbonLeakageScore Float?
+
+  // Scoring
+  rankScore             Float?
+  candidatesEvaluated   Int?
+  feasibleCandidates    Int?
+
+  // Timestamps
+  createdAt             DateTime @default(now())
+  verifiedAt            DateTime?
+
+  @@index([orgId, createdAt])
+  @@index([decisionFrameId])
+  @@index([commandId])
+  @@index([chosenRegion, createdAt])
+  @@index([jobClass, createdAt])
+}
+
+// ============================================================================
+// ROUTING CANDIDATES — FULL DECISION AUDIT TRAIL
+// ============================================================================
+
+model RoutingCandidate {
+  id                    String   @id @default(cuid())
+  decisionFrameId       String
+  region                String
+  startTs               DateTime?
+
+  // Estimates at decision time
+  carbonEstimateGPerKwh Float?
+  latencyEstimateMs     Float?
+  queueDelayEstimateSec Float?
+  costEstimateUsd       Float?
+  confidenceScore       Float?
+  retryRiskScore        Float?
+
+  // Scoring breakdown
+  carbonScore           Float?
+  latencyScore          Float?
+  costScore             Float?
+  queueScore            Float?
+  uncertaintyScore      Float?
+  rankScore             Float?
+
+  // Selection
+  wasSelected           Boolean  @default(false)
+  wasFeasible           Boolean  @default(true)
+  rejectionReason       String?
+
+  createdAt             DateTime @default(now())
+
+  @@index([decisionFrameId])
+  @@index([region, createdAt])
+}
+
+// ============================================================================
+// PROVIDER SNAPSHOTS — SIGNAL PROVENANCE
+// ============================================================================
+
+model ProviderSnapshot {
+  id                    String   @id @default(cuid())
+  provider              String   // watttime | electricity_maps | ember | eia930
+  zone                  String   // Region/zone code
+  signalType            String   // moer_current | moer_forecast | intensity | mix | structural
+
+  signalValue           Float
+  forecastForTs         DateTime?
+  observedAt            DateTime
+
+  freshnessSec          Int?
+  confidence            Float?
+  metadata              Json     @default("{}")
+
+  createdAt             DateTime @default(now())
+
+  @@index([provider, zone, observedAt])
+  @@index([zone, signalType, observedAt])
+  @@unique([provider, zone, signalType, observedAt])
+}
+
+model WaterProviderSnapshot {
+  id             String   @id @default(cuid())
+  provider       String
+  authorityRole  String
+  region         String
+  scenario       String   @default("current")
+  authorityMode  String
+  confidence     Float?
+  evidenceRefs   Json     @default("[]")
+  observedAt     DateTime
+  metadata       Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  @@index([provider, observedAt])
+  @@index([region, scenario, observedAt])
+}
+
+model FacilityWaterTelemetry {
+  id                 String   @id @default(cuid())
+  facilityId         String
+  region             String
+  scenario           String   @default("current")
+  waterIntensityLPerKwh Float?
+  waterStressIndex   Float?
+  scarcityImpact     Float?
+  confidence         Float?
+  telemetryRef       String
+  evidenceRefs       Json     @default("[]")
+  createdAt          DateTime @default(now())
+
+  @@index([facilityId, createdAt])
+  @@index([region, scenario, createdAt])
+}
+
+model WaterScenarioRun {
+  id             String   @id @default(cuid())
+  decisionFrameId String
+  scenario       String
+  requestPayload Json
+  resultPayload  Json
+  createdAt      DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([scenario, createdAt])
+}
+
+model WaterPolicyEvidence {
+  id                  String   @id @default(cuid())
+  decisionFrameId     String
+  proofHash           String
+  authorityMode       String
+  scenario            String   @default("current")
+  facilityId          String?
+  supplierRefs        Json     @default("[]")
+  evidenceRefs        Json     @default("[]")
+  providerSnapshotRefs Json    @default("[]")
+  externalPolicyRefs  Json     @default("[]")
+  bundleHash          String?
+  manifestHash        String?
+  metadata            Json     @default("{}")
+  createdAt           DateTime @default(now())
+
+  @@index([decisionFrameId, createdAt])
+  @@index([proofHash])
+}
+
+// ============================================================================
+// CAPACITY BUCKETS — FLEET-AWARE RESOURCE MANAGEMENT
+// ============================================================================
+
+model CapacityBucket {
+  id                    String   @id @default(cuid())
+  region                String
+  bucketStartTs         DateTime // Hourly bucket
+
+  // Capacity tracking
+  cpuAvailable          Float    @default(1000)
+  gpuAvailable          Float    @default(100)
+  reservedCpu           Float    @default(0)
+  reservedGpu           Float    @default(0)
+  allocatedCommands     Int      @default(0)
+  queueDepth            Int      @default(0)
+
+  // Cost multiplier (surge pricing indicator)
+  costMultiplier        Float    @default(1.0)
+
+  updatedAt             DateTime @updatedAt
+
+  @@unique([region, bucketStartTs])
+  @@index([region, bucketStartTs])
+}
+
+// ============================================================================
+// CI/CD ROUTING DECISIONS — CARBON-AWARE RUNNER SELECTION
+// ============================================================================
+
+model CIDecision {
+  id                    String   @id @default(cuid())
+
+  // Decision details
+  decisionFrameId       String   // Links to routing decision frame
+  selectedRunner        String   // e.g., "ubuntu-latest"
+  selectedRegion        String   // e.g., "us-east-1"
+  
+  // Carbon metrics
+  carbonIntensity        Float    // gCO2/kWh
+  baseline              Float    // Baseline carbon intensity
+  savings               Float    // Percentage savings vs baseline
+  
+  // Request parameters
+  jobType               String   // standard | heavy | light
+  preferredRegions      Json     // Array of preferred regions
+  carbonWeight          Float    // Carbon importance weight (0-1)
+  
+  // Recommendation
+  recommendation        String   // Routing recommendation text
+
+  // Deterministic policy outcome
+  decisionAction        String?  // run_now | reroute | delay | throttle | deny
+  decisionMode          String?  // runtime_authorization | scenario_planning
+  reasonCode            String?
+  signalConfidence      Float?
+  fallbackUsed          Boolean  @default(false)
+
+  // Water-proof metrics
+  waterImpactLiters     Float?
+  waterBaselineLiters   Float?
+  waterScarcityImpact   Float?
+  waterStressIndex      Float?
+  waterConfidence       Float?
+  waterAuthorityMode    String?
+  waterScenario         String?
+  facilityId            String?
+  proofHash             String?
+  waterEvidenceRefs     Json     @default("[]")
+  policyTrace           Json     @default("{}")
+  datasetVersions       Json     @default("{}")
+  
+  // Metadata
+  metadata              Json     @default("{}")
+  
+  createdAt             DateTime @default(now())
+
+  @@index([decisionFrameId])
+  @@index([selectedRegion, createdAt])
+  @@index([jobType, createdAt])
+  @@index([createdAt])
+}

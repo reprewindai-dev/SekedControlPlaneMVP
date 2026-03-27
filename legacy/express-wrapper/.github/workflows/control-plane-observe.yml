@@ -1,0 +1,67 @@
+name: Control Plane Observe
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */4 * * *'
+
+jobs:
+  observe:
+    runs-on: [self-hosted, Windows, X64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate required secrets
+        shell: powershell
+        env:
+          SEKED_CONTROL_PLANE_URL: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          SEKED_CONTROL_PLANE_API_KEY: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_CONTROL_PLANE_URL)) { $missing += 'SEKED_CONTROL_PLANE_URL' }
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_CONTROL_PLANE_API_KEY)) { $missing += 'SEKED_CONTROL_PLANE_API_KEY' }
+          if ($missing.Count -gt 0) {
+            throw "Missing required secrets: $($missing -join ', ')"
+          }
+
+      - name: Collect control plane telemetry
+        id: observe
+        uses: ./.github/actions/control-plane-observer
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          analytics-limit: '50'
+          usage-days: '30'
+          provider-days: '30'
+
+      - name: Assert healthy control plane
+        shell: powershell
+        run: |
+          if ('${{ steps.observe.outputs.health-status }}' -ne 'ok') {
+            throw "Control plane health check failed: ${{ steps.observe.outputs.health-status }}"
+          }
+
+      - name: Publish summary
+        shell: powershell
+        run: |
+          @"
+          ## Seked Control Plane Observe
+
+          - Health: `${{ steps.observe.outputs.health-status }}`
+          - Runs: `${{ steps.observe.outputs.total-runs }}`
+          - Completed: `${{ steps.observe.outputs.completed-runs }}`
+          - Failed: `${{ steps.observe.outputs.failed-runs }}`
+          - Avg quality score: `${{ steps.observe.outputs.avg-quality-score }}`
+          - Avg routing latency (ms): `${{ steps.observe.outputs.avg-routing-latency-ms }}`
+          - Avg routing cost (USD): `${{ steps.observe.outputs.avg-routing-cost-usd }}`
+          - Providers tracked: `${{ steps.observe.outputs.provider-count }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload telemetry artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: seked-control-plane-observe
+          path: ${{ steps.observe.outputs.artifact-dir }}
+          if-no-files-found: error

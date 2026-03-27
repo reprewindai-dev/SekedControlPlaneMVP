@@ -1,0 +1,48 @@
+name: Refresh Carbon Forecasts
+
+# Pull fresh carbon forecasts via GET /api/v1/forecasting/:region/forecasts
+# Frequency: Every 30 minutes
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+env:
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  refresh-forecasts:
+    name: Refresh Carbon Forecasts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify engine is up
+        run: curl -sf "${ECOBE_ENGINE_URL}/health" || (echo "Engine is down" && exit 1)
+
+      - name: Refresh forecasts - us-east-1
+        run: |
+          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/us-east-1/forecasts?hoursAhead=24" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+
+      - name: Refresh forecasts - us-west-2
+        run: |
+          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/us-west-2/forecasts?hoursAhead=24" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+
+      - name: Refresh forecasts - eu-west-1
+        run: |
+          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/eu-west-1/forecasts?hoursAhead=24" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+
+      - name: Refresh forecasts - ap-southeast-1
+        run: |
+          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/ap-southeast-1/forecasts?hoursAhead=24" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+
+      - name: Check forecast accuracy
+        run: |
+          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/accuracy" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          echo "Forecast refresh cycle complete"

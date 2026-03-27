@@ -1,0 +1,181 @@
+name: 'Seked Synthetic Run'
+description: 'Create a real control-plane run, poll it to completion, and surface routing and quality outputs'
+
+inputs:
+  base-url:
+    description: 'Deployed Seked control plane base URL'
+    required: true
+  api-key:
+    description: 'Bearer API key for the Seked control plane'
+    required: true
+  project-id:
+    description: 'Project identifier to execute against'
+    required: true
+  policy-profile-id:
+    description: 'Policy profile identifier to execute against'
+    required: true
+  schema-id:
+    description: 'Schema identifier to execute against'
+    required: true
+  provider-preference:
+    description: 'Comma-separated provider preference list'
+    required: false
+    default: ''
+  task-type:
+    description: 'Task type recorded on the run'
+    required: false
+    default: 'synthetic_evaluation'
+  risk-level:
+    description: 'Risk level recorded on the run'
+    required: false
+    default: 'medium'
+  input-text:
+    description: 'Input text used for the synthetic request payload'
+    required: false
+    default: 'scheduled seked control-plane benchmark'
+  latency-ms-max:
+    description: 'Optional latency budget'
+    required: false
+    default: '5000'
+  cost-usd-max:
+    description: 'Optional cost budget'
+    required: false
+    default: '0.05'
+  poll-interval-seconds:
+    description: 'Polling interval while waiting for completion'
+    required: false
+    default: '5'
+  poll-timeout-seconds:
+    description: 'Maximum time to wait for completion'
+    required: false
+    default: '180'
+
+outputs:
+  run-id:
+    description: 'Created run identifier'
+    value: ${{ steps.run.outputs.run-id }}
+  final-status:
+    description: 'Final run status'
+    value: ${{ steps.run.outputs.final-status }}
+  provider:
+    description: 'Selected provider'
+    value: ${{ steps.run.outputs.provider }}
+  region:
+    description: 'Selected region'
+    value: ${{ steps.run.outputs.region }}
+  quality-score:
+    description: 'Final quality score'
+    value: ${{ steps.run.outputs.quality-score }}
+  detrimental-score:
+    description: 'Seked detrimental score'
+    value: ${{ steps.run.outputs.detrimental-score }}
+  attempts-used:
+    description: 'Convergence attempts used'
+    value: ${{ steps.run.outputs.attempts-used }}
+  routing-latency-ms:
+    description: 'Observed routing latency'
+    value: ${{ steps.run.outputs.routing-latency-ms }}
+  routing-cost-usd:
+    description: 'Routing cost estimate'
+    value: ${{ steps.run.outputs.routing-cost-usd }}
+  artifact-dir:
+    description: 'Directory containing the run payload, submission, and final detail'
+    value: ${{ steps.run.outputs.artifact-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: run
+      shell: powershell
+      run: |
+        $ErrorActionPreference = 'Stop'
+        function Get-Value($value, $defaultValue) {
+          if ($null -eq $value) { return $defaultValue }
+          if ($value -is [string] -and [string]::IsNullOrWhiteSpace($value)) { return $defaultValue }
+          return $value
+        }
+
+        $baseUrl = '${{ inputs.base-url }}'.TrimEnd('/')
+        $apiKey = '${{ inputs.api-key }}'
+        $headers = @{
+          Authorization = "Bearer $apiKey"
+          'Content-Type' = 'application/json'
+        }
+        $artifactDir = Join-Path $env:RUNNER_TEMP 'seked-synthetic-run'
+        New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+        [string[]]$providerPreference = @()
+        if (-not [string]::IsNullOrWhiteSpace('${{ inputs.provider-preference }}')) {
+          $providerPreference = @(
+            '${{ inputs.provider-preference }}'.Split(',') |
+              ForEach-Object { $_.Trim() } |
+              Where-Object { $_ }
+          )
+        }
+
+        $payload = @{
+          project_id = '${{ inputs.project-id }}'
+          policy_profile_id = '${{ inputs.policy-profile-id }}'
+          schema_id = '${{ inputs.schema-id }}'
+          task = @{
+            type = '${{ inputs.task-type }}'
+            risk_level = '${{ inputs.risk-level }}'
+          }
+          inputs = @{
+            prompt = '${{ inputs.input-text }}'
+            source = 'github-actions'
+            timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+          }
+          constraints = @{
+            latency_ms_max = [double]'${{ inputs.latency-ms-max }}'
+            cost_usd_max = [double]'${{ inputs.cost-usd-max }}'
+          }
+        }
+        if ($providerPreference.Count -gt 0) {
+          $payload.execution = @{ provider_preference = [string[]]$providerPreference }
+        }
+
+        $payloadPath = Join-Path $artifactDir 'payload.json'
+        $payloadJson = $payload | ConvertTo-Json -Depth 20
+        $payloadJson | Set-Content -Path $payloadPath -Encoding utf8
+
+        $submission = Invoke-RestMethod -Method Post -Uri "$baseUrl/runs" -Headers $headers -Body $payloadJson
+        $submission | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'submission.json') -Encoding utf8
+
+        $runId = $submission.run_id
+        if ([string]::IsNullOrWhiteSpace($runId)) {
+          throw 'Missing run_id in submission response'
+        }
+
+        $deadline = (Get-Date).ToUniversalTime().AddSeconds([int]'${{ inputs.poll-timeout-seconds }}')
+        $finalStatus = ''
+        $detail = $null
+
+        while ((Get-Date).ToUniversalTime() -lt $deadline) {
+          $detail = Invoke-RestMethod -Method Get -Headers @{ Authorization = "Bearer $apiKey" } -Uri "$baseUrl/runs/$runId"
+          $detail | ConvertTo-Json -Depth 100 | Set-Content -Path (Join-Path $artifactDir 'run-detail.json') -Encoding utf8
+          $finalStatus = "$($detail.status)"
+          if ($finalStatus -eq 'completed' -or $finalStatus -eq 'failed') {
+            break
+          }
+          Start-Sleep -Seconds ([int]'${{ inputs.poll-interval-seconds }}')
+        }
+
+        if ($finalStatus -ne 'completed' -and $finalStatus -ne 'failed') {
+          throw "Timed out waiting for run $runId to finish"
+        }
+
+        "run-id=$runId" >> $env:GITHUB_OUTPUT
+        "final-status=$finalStatus" >> $env:GITHUB_OUTPUT
+        "provider=$(Get-Value $detail.routingDecision.provider '')" >> $env:GITHUB_OUTPUT
+        "region=$(Get-Value $detail.routingDecision.region '')" >> $env:GITHUB_OUTPUT
+        "quality-score=$(Get-Value $detail.convergenceRun.finalQualityScore 0)" >> $env:GITHUB_OUTPUT
+        "detrimental-score=$(Get-Value $detail.sekedScore.detrimentalScore 0)" >> $env:GITHUB_OUTPUT
+        "attempts-used=$(Get-Value $detail.convergenceRun.attemptsUsed 0)" >> $env:GITHUB_OUTPUT
+        "routing-latency-ms=$(Get-Value $detail.routingDecision.estimatedLatencyMs 0)" >> $env:GITHUB_OUTPUT
+        "routing-cost-usd=$(Get-Value $detail.routingDecision.estimatedCostUsd 0)" >> $env:GITHUB_OUTPUT
+        "artifact-dir=$artifactDir" >> $env:GITHUB_OUTPUT
+
+        if ($finalStatus -ne 'completed') {
+          throw "Synthetic run $runId finished with status $finalStatus"
+        }

@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: '24'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Lint
+      run: |
+        if [ -f eslint.config.js ] || [ -f eslint.config.cjs ] || [ -f .eslintrc ] || [ -f .eslintrc.js ] || [ -f .eslintrc.cjs ] || [ -f .eslintrc.json ]; then
+          npm run lint
+        else
+          echo "Skipping lint: no ESLint config present"
+        fi
+
+    - name: Build
+      run: npm run build
+
+    - name: Prisma generate
+      run: npm run prisma:generate
+
+    - name: Test
+      run: |
+        if find src -type f \( -name "*.test.ts" -o -name "*.spec.ts" \) | grep -q .; then
+          npm test
+        else
+          echo "Skipping tests: no test files present"
+        fi

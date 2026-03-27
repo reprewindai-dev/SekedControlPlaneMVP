@@ -1,0 +1,55 @@
+name: Verify Signal Quality
+
+# Verify engine health and live signals across key regions
+# Calls health + CI routing which exercises the full provider stack
+# Frequency: Every 6 hours
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+env:
+  ECOBE_ENGINE_URL: ${{ secrets.ECOBE_ENGINE_URL }}
+  ECOBE_ENGINE_API_KEY: ${{ secrets.ECOBE_ENGINE_API_KEY }}
+
+jobs:
+  verify-signals:
+    name: Verify Signal Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Engine health check
+        run: |
+          response=$(curl -sf "${ECOBE_ENGINE_URL}/health")
+          echo "Engine health: $response"
+          echo "$response" | grep -q '"status":"ok"' || (echo "Engine degraded" && exit 1)
+
+      - name: CI routing health - exercises full provider stack
+        run: |
+          response=$(curl -sf "${ECOBE_ENGINE_URL}/api/v1/ci/health" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}")
+          echo "CI health: $response"
+
+      - name: Live signal - us-east-1
+        run: |
+          response=$(curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["us-east-1"],"carbonWeight":0.7,"jobType":"standard"}')
+          echo "us-east-1 signal: $response"
+          echo "$response" | grep -q 'carbonIntensity' || (echo "No carbon signal returned" && exit 1)
+
+      - name: Live signal - eu-west-1
+        run: |
+          response=$(curl -sf -X POST "${ECOBE_ENGINE_URL}/api/v1/ci/route" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"preferredRegions":["eu-west-1"],"carbonWeight":0.7,"jobType":"standard"}')
+          echo "eu-west-1 signal: $response"
+
+      - name: Forecast accuracy check
+        run: |
+          curl -sf "${ECOBE_ENGINE_URL}/api/v1/forecasting/accuracy" \
+            -H "Authorization: Bearer ${ECOBE_ENGINE_API_KEY}"
+          echo "Signal verification complete"

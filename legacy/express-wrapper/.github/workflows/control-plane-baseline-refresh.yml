@@ -1,0 +1,110 @@
+name: Control Plane Baseline Refresh
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider_preference:
+        description: 'Optional comma-separated provider preference list'
+        required: false
+        default: ''
+      task_type:
+        description: 'Task type for the synthetic run'
+        required: false
+        default: 'synthetic_evaluation'
+      risk_level:
+        description: 'Risk level for the synthetic run'
+        required: false
+        default: 'medium'
+      input_text:
+        description: 'Synthetic prompt text'
+        required: false
+        default: 'scheduled seked control-plane benchmark'
+  schedule:
+    - cron: '43 */6 * * *'
+
+jobs:
+  refresh:
+    runs-on: [self-hosted, Windows, X64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate required secrets
+        shell: powershell
+        env:
+          SEKED_CONTROL_PLANE_URL: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          SEKED_CONTROL_PLANE_API_KEY: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          SEKED_PROJECT_ID: ${{ secrets.SEKED_PROJECT_ID }}
+          SEKED_POLICY_PROFILE_ID: ${{ secrets.SEKED_POLICY_PROFILE_ID }}
+          SEKED_SCHEMA_ID: ${{ secrets.SEKED_SCHEMA_ID }}
+        run: |
+          $missing = @()
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_CONTROL_PLANE_URL)) { $missing += 'SEKED_CONTROL_PLANE_URL' }
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_CONTROL_PLANE_API_KEY)) { $missing += 'SEKED_CONTROL_PLANE_API_KEY' }
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_PROJECT_ID)) { $missing += 'SEKED_PROJECT_ID' }
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_POLICY_PROFILE_ID)) { $missing += 'SEKED_POLICY_PROFILE_ID' }
+          if ([string]::IsNullOrWhiteSpace($env:SEKED_SCHEMA_ID)) { $missing += 'SEKED_SCHEMA_ID' }
+          if ($missing.Count -gt 0) {
+            throw "Missing required secrets: $($missing -join ', ')"
+          }
+
+      - name: Execute synthetic run
+        id: run
+        uses: ./.github/actions/synthetic-run
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          project-id: ${{ secrets.SEKED_PROJECT_ID }}
+          policy-profile-id: ${{ secrets.SEKED_POLICY_PROFILE_ID }}
+          schema-id: ${{ secrets.SEKED_SCHEMA_ID }}
+          provider-preference: ${{ github.event.inputs.provider_preference || '' }}
+          task-type: ${{ github.event.inputs.task_type || 'synthetic_evaluation' }}
+          risk-level: ${{ github.event.inputs.risk_level || 'medium' }}
+          input-text: ${{ github.event.inputs.input_text || 'scheduled seked control-plane benchmark' }}
+          latency-ms-max: '5000'
+          cost-usd-max: '0.05'
+          poll-interval-seconds: '5'
+          poll-timeout-seconds: '180'
+
+      - name: Re-collect provider analytics
+        id: observe
+        uses: ./.github/actions/control-plane-observer
+        with:
+          base-url: ${{ secrets.SEKED_CONTROL_PLANE_URL }}
+          api-key: ${{ secrets.SEKED_CONTROL_PLANE_API_KEY }}
+          analytics-limit: '20'
+          usage-days: '14'
+          provider-days: '30'
+
+      - name: Publish summary
+        shell: powershell
+        run: |
+          @"
+          ## Seked Control Plane Baseline Refresh
+
+          - Run ID: `${{ steps.run.outputs.run-id }}`
+          - Final status: `${{ steps.run.outputs.final-status }}`
+          - Provider: `${{ steps.run.outputs.provider }}`
+          - Region: `${{ steps.run.outputs.region }}`
+          - Quality score: `${{ steps.run.outputs.quality-score }}`
+          - Detrimental score: `${{ steps.run.outputs.detrimental-score }}`
+          - Attempts used: `${{ steps.run.outputs.attempts-used }}`
+          - Routing latency (ms): `${{ steps.run.outputs.routing-latency-ms }}`
+          - Routing cost (USD): `${{ steps.run.outputs.routing-cost-usd }}`
+          - Providers tracked after refresh: `${{ steps.observe.outputs.provider-count }}`
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload synthetic run artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: seked-control-plane-synthetic-run
+          path: ${{ steps.run.outputs.artifact-dir }}
+          if-no-files-found: error
+
+      - name: Upload refreshed telemetry artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: seked-control-plane-refresh-observe
+          path: ${{ steps.observe.outputs.artifact-dir }}
+          if-no-files-found: error

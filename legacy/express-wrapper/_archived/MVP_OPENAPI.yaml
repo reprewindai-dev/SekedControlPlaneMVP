@@ -1,0 +1,566 @@
+openapi: 3.0.3
+info:
+  title: Seked Control Plane API
+  description: Enterprise AI Governance Platform - Three Plane Governance
+  version: 1.0.0
+  contact:
+    name: Seked Control Plane
+    email: api@seked-controlplane.com
+
+servers:
+  - url: https://api.seked-controlplane.com/v1
+    description: Production
+  - url: https://staging-api.seked-controlplane.com/v1
+    description: Staging
+
+paths:
+  /runs:
+    post:
+      tags:
+        - Runs
+      summary: Create governed AI run
+      description: Submit a request for three-plane governance processing
+      operationId: createRun
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+            examples:
+              simpleTask:
+                summary: Simple task
+                value:
+                  policy_profile_id: "pol_prof_001"
+                  schema_id: "sch_simple_v1"
+                  task:
+                    type: "text_generation"
+                    risk_level: "low"
+                  inputs:
+                    prompt: "Generate a summary of the quarterly report"
+                  constraints:
+                    latency_ms_max: 5000
+                    cost_usd_max: 0.05
+                  execution:
+                    provider_preference: ["openai", "anthropic"]
+      responses:
+        '202':
+          description: Run accepted for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRunResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /runs/{run_id}:
+    get:
+      tags:
+        - Runs
+      summary: Get run status and result
+      description: Retrieve the current status and final result of a governed run
+      operationId: getRun
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Unique identifier for the run
+      responses:
+        '200':
+          description: Run details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetails'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /runs/{run_id}/events:
+    get:
+      tags:
+        - Runs
+      summary: Get run audit trail
+      description: Retrieve the complete event log for a run
+      operationId: getRunEvents
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+          description: Maximum number of events to return
+      responses:
+        '200':
+          description: Events retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RunEvent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /policies:
+    post:
+      tags:
+        - Policies
+      summary: Create policy profile
+      description: Create a new governance policy profile
+      operationId: createPolicy
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+      responses:
+        '201':
+          description: Policy created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Policy with this name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /policies/{policy_id}:
+    get:
+      tags:
+        - Policies
+      summary: Get policy profile
+      description: Retrieve a specific policy profile
+      operationId: getPolicy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: policy_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Policy identifier
+      responses:
+        '200':
+          description: Policy retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyProfile'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /health:
+    get:
+      tags:
+        - System
+      summary: Health check
+      description: System health status
+      operationId: healthCheck
+      responses:
+        '200':
+          description: System healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  version:
+                    type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    CreateRunRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+          description: Optional client-provided request identifier
+        policy_profile_id:
+          type: string
+          description: Policy profile to apply
+        schema_id:
+          type: string
+          description: Output schema for validation
+        task:
+          type: object
+          properties:
+            type:
+              type: string
+              description: Task type
+            risk_level:
+              type: string
+              enum: [low, medium, high, critical]
+          required:
+            - type
+        inputs:
+          type: object
+          properties:
+            prompt:
+              type: string
+              description: Main prompt/task description
+            context:
+              type: object
+              description: Additional context data
+              additionalProperties: true
+          required:
+            - prompt
+        constraints:
+          type: object
+          properties:
+            latency_ms_max:
+              type: integer
+              minimum: 0
+            cost_usd_max:
+              type: number
+              minimum: 0
+          required:
+            - latency_ms_max
+        execution:
+          type: object
+          properties:
+            provider_preference:
+              type: array
+              items:
+                type: string
+              description: Preferred model providers in order
+      required:
+        - policy_profile_id
+        - schema_id
+        - inputs
+        - constraints
+
+    CreateRunResponse:
+      type: object
+      properties:
+        run_id:
+          type: string
+          format: uuid
+          description: Unique run identifier
+        status:
+          type: string
+          enum: [queued, running, blocked, completed, failed]
+          description: Initial run status
+        message:
+          type: string
+          description: Status message
+      required:
+        - run_id
+        - status
+
+    RunDetails:
+      type: object
+      properties:
+        run_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, blocked, completed, failed]
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        final_output:
+          type: object
+          description: Final validated output
+          additionalProperties: true
+          nullable: true
+        governance_metadata:
+          type: object
+          properties:
+            detrimental_score:
+              type: number
+              minimum: 0
+              maximum: 1
+            fracture_detected:
+              type: boolean
+            drift_delta:
+              type: number
+              minimum: 0
+              maximum: 1
+            escalation_tier:
+              type: integer
+              minimum: 0
+              maximum: 2
+          nullable: true
+        convergence_metadata:
+          type: object
+          properties:
+            attempts:
+              type: integer
+              minimum: 1
+            converged:
+              type: boolean
+            quality_score:
+              type: number
+              minimum: 0
+              maximum: 1
+          nullable: true
+        routing_metadata:
+          type: object
+          properties:
+            provider:
+              type: string
+            region:
+              type: string
+            estimated_cost_usd:
+              type: number
+            estimated_latency_ms:
+              type: integer
+          nullable: true
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          nullable: true
+      required:
+        - run_id
+        - status
+        - created_at
+
+    RunEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum:
+            - RUN_CREATED
+            - POLICY_EVALUATED
+            - SEKED_SCORED
+            - CONVERGE_ATTEMPTED
+            - CONVERGE_PASSED
+            - CONVERGE_FAILED
+            - ECOBE_ROUTED
+            - RUN_COMPLETED
+            - RUN_BLOCKED
+        ts:
+          type: string
+          format: date-time
+        data:
+          type: object
+          description: Event-specific data
+          additionalProperties: true
+      required:
+        - type
+        - ts
+        - data
+
+    CreatePolicyRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Human-readable policy name
+        config:
+          type: object
+          properties:
+            seked:
+              type: object
+              properties:
+                escalation_thresholds:
+                  type: object
+                  properties:
+                    tier0:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                    tier1:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                    tier2:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                  required:
+                    - tier0
+                    - tier1
+                    - tier2
+            converge:
+              type: object
+              properties:
+                max_attempts:
+                  type: integer
+                  minimum: 1
+                  maximum: 10
+                quality_threshold:
+                  type: number
+                  minimum: 0
+                  maximum: 1
+              required:
+                - max_attempts
+                - quality_threshold
+            ecobe:
+              type: object
+              properties:
+                carbon_mode:
+                  type: string
+                  enum: [minimize, balance, ignore]
+                weights:
+                  type: object
+                  properties:
+                    carbon:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                    latency:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                    cost:
+                      type: number
+                      minimum: 0
+                      maximum: 1
+                  required:
+                    - carbon
+                    - latency
+                    - cost
+              required:
+                - carbon_mode
+                - weights
+          required:
+            - seked
+            - converge
+            - ecobe
+      required:
+        - name
+        - config
+
+    PolicyProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        config:
+          type: object
+        version:
+          type: integer
+        status:
+          type: string
+          enum: [draft, approved]
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - version
+        - status
+        - created_at
+        - config
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+      required:
+        - error
+        - message
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    RateLimited:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+tags:
+  - name: Runs
+    description: Run management and monitoring
+  - name: Policies
+    description: Policy profile management
+  - name: System
+    description: System health and status

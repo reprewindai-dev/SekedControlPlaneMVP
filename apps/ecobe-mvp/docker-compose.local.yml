@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ecobe_platform
+    ports:
+      - "5432:5432"
+    volumes:
+      - ecobe_mvp_postgres:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  ecobe-engine:
+    build:
+      context: ../ecobe-engineclaude/ecobe-engine
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ecobe_platform?schema=engine
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ecobe_platform?schema=engine
+      REDIS_URL: redis://redis:6379
+      ECOBE_INTERNAL_API_KEY: replace-with-shared-internal-key
+      ENGINE_BACKGROUND_WORKERS_ENABLED: "false"
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8080:8080"
+
+  ecobe-mvp:
+    build:
+      context: .
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ecobe_platform?schema=mvp
+      ECOBE_ENGINE_URL: http://ecobe-engine:8080
+      ECOBE_ENGINE_INTERNAL_KEY: replace-with-shared-internal-key
+      AUDIT_SIGNING_SECRET: local-audit-secret
+      ECOBE_ADMIN_TOKEN: ecobe-admin-local
+      USE_LOCAL_GOVERNANCE_FALLBACK: "true"
+    depends_on:
+      - postgres
+      - ecobe-engine
+    ports:
+      - "3000:3000"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  ecobe_mvp_postgres:
