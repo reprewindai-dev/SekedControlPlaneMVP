@@ -9,10 +9,10 @@ import EmbeddedPostgres from 'embedded-postgres'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const mvpRoot = path.resolve(__dirname, '..')
-const engineRoot = path.resolve(mvpRoot, '..', 'ecobe-engineclaude', 'ecobe-engine')
+const engineRoot = path.resolve(mvpRoot, '..', 'ecobe-engine')
 
 const postgresPort = 35432
-const mvpPort = 3300
+const mvpPort = 3301
 const enginePort = 38080
 const databaseName = 'ecobe_platform'
 const dbBaseUrl = `postgresql://postgres:postgres@127.0.0.1:${postgresPort}/${databaseName}`
@@ -99,17 +99,25 @@ async function main() {
       authorization: 'Bearer replace-with-shared-internal-key',
     })
 
-    const mvpProcess = spawnProcess('npm', ['run', 'start', '--', '-p', String(mvpPort), '-H', '0.0.0.0'], {
+    const mvpProcess = spawnProcess('npm', ['run', 'dev', '--', '--hostname', '0.0.0.0', '--port', String(mvpPort)], {
       cwd: mvpRoot,
       env: {
         ...process.env,
         PORT: String(mvpPort),
+        HOST: '0.0.0.0',
+        NEXT_PUBLIC_APP_URL: `http://127.0.0.1:${mvpPort}`,
         DATABASE_URL: mvpDbUrl,
         ECOBE_ENGINE_URL: `http://127.0.0.1:${enginePort}`,
         ECOBE_ENGINE_INTERNAL_KEY: 'replace-with-shared-internal-key',
+        SEKED_URL: '',
+        SEKED_INTERNAL_KEY: '',
+        CONVERGEOS_URL: '',
+        CONVERGEOS_INTERNAL_KEY: '',
         AUDIT_SIGNING_SECRET: 'local-audit-secret',
         ECOBE_ADMIN_TOKEN: 'ecobe-admin-local',
         USE_LOCAL_GOVERNANCE_FALLBACK: 'true',
+        OLLAMA_BASE_URL: 'http://127.0.0.1:11434',
+        OLLAMA_MODEL: 'qwen2.5:1.5b',
       },
       label: 'mvp',
       logFile: path.join(logDir, 'mvp.log'),
@@ -205,6 +213,15 @@ async function waitForHttp(url, timeoutMs, headers = {}) {
 
 function resolveInvocation(command, args) {
   if (process.platform === 'win32' && command === 'npm') {
+    const nodeExe = 'C:\\Program Files\\nodejs\\node.exe'
+    const npmCli = 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js'
+    if (fs.existsSync(nodeExe) && fs.existsSync(npmCli)) {
+      return {
+        command: nodeExe,
+        args: [npmCli, ...args],
+      }
+    }
+
     return {
       command: 'cmd.exe',
       args: ['/d', '/s', '/c', command, ...args],

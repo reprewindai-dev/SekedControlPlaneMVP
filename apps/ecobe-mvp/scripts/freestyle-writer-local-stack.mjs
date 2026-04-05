@@ -14,7 +14,7 @@ const engineRoot = path.resolve(mvpRoot, '..', 'ecobe-engine')
 const freestyleWriterRoot = path.resolve(mvpRoot, '..', '..', '..', 'freestylewriter')
 
 const postgresPort = 35432
-const mvpPort = 3300
+const mvpPort = 3301
 const enginePort = 38080
 const freestyleWriterPort = 3400
 const controlPlaneDatabaseName = 'ecobe_platform'
@@ -162,7 +162,7 @@ async function main() {
 
     if (!(await isPortOpen(mvpPort))) {
       console.log('Starting ecobe-mvp...')
-      const mvpProcess = spawnProcess('npm', ['run', 'start', '--', '-p', String(mvpPort), '-H', '0.0.0.0'], {
+      const mvpProcess = spawnProcess('npm', ['run', 'dev', '--', '--hostname', '0.0.0.0', '--port', String(mvpPort)], {
         cwd: mvpRoot,
         env: {
           ...process.env,

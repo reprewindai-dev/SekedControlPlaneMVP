@@ -1,4 +1,4 @@
-const baseUrl = process.env.ECOBE_MVP_URL || 'http://localhost:3000'
+const baseUrl = process.env.ECOBE_MVP_URL || 'http://127.0.0.1:3301'
 const adminToken = process.env.ECOBE_ADMIN_TOKEN || 'ecobe-admin-local'
 
 async function fetchWithTimeout(url, init, timeoutMs = 30000) {
@@ -47,18 +47,23 @@ async function main() {
     body: JSON.stringify({
       environmentSlug: 'production',
       input: {
-        prompt: 'Summarize this support thread and produce a compliant response.',
+        prompt: 'Return a JSON support response with a short summary and a compliant reply.',
       },
       providerConstraints: {
         preferredRegions: ['FR', 'US-EAST-1'],
-        providers: ['openai'],
+        providers: ['ollama'],
       },
       latencyCeiling: 250,
       costCeiling: 0.08,
-      model: 'gpt-4.1',
+      model: 'qwen2.5:1.5b',
       tokenCount: 12000,
-      output: {
-        message: 'Governed run completed.',
+      schema: {
+        type: 'object',
+        required: ['summary', 'reply'],
+        properties: {
+          summary: { type: 'string' },
+          reply: { type: 'string' },
+        },
       },
     }),
   }, 60000)

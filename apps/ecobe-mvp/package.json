@@ -16,7 +16,8 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "happy-path": "node scripts/happy-path.mjs",
     "e2e:local": "node scripts/e2e-local.mjs",
-    "freestyle-writer:local": "node scripts/freestyle-writer-local-stack.mjs"
+    "freestyle-writer:local": "node scripts/freestyle-writer-local-stack.mjs",
+    "dev:governed-local": "next dev --hostname 0.0.0.0 --port 3301"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
