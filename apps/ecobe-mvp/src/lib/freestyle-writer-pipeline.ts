@@ -91,7 +91,7 @@ export async function executeFreestyleWriterPipeline(input: {
   temperature: number
   maxAttempts: number
   model: string
-  generateWithOllama: (input: { task: string; schema?: JsonObject; temperature: number }) => Promise<string>
+  generateWithModel: (input: { task: string; schema?: JsonObject; temperature: number }) => Promise<string>
   preservationPolicy?: PreservationPolicy
   artistMemory?: Record<string, unknown>
 }): Promise<PipelineResult> {
@@ -101,7 +101,7 @@ export async function executeFreestyleWriterPipeline(input: {
     transcript,
     deterministic,
     temperature: Math.min(0.35, input.temperature),
-    generateWithOllama: input.generateWithOllama,
+    generateWithModel: input.generateWithModel,
   })
   const merged = mergeExtraction(deterministic, extraction)
   let lastError = 'Freestyle Writer generation failed'
@@ -118,7 +118,7 @@ export async function executeFreestyleWriterPipeline(input: {
     })
 
     try {
-      const rawContent = await input.generateWithOllama({
+      const rawContent = await input.generateWithModel({
         task,
         schema: input.schema,
         temperature: Math.min(0.5, input.temperature),
@@ -274,7 +274,7 @@ async function extractWithModel(input: {
   transcript: string
   deterministic: ExtractionResult
   temperature: number
-  generateWithOllama: (input: { task: string; schema?: JsonObject; temperature: number }) => Promise<string>
+  generateWithModel: (input: { task: string; schema?: JsonObject; temperature: number }) => Promise<string>
 }) {
   const task = [
     'You are extracting preserved artist material for a source-first lyric reconstruction pipeline.',
@@ -296,7 +296,7 @@ async function extractWithModel(input: {
   ].join('\n')
 
   try {
-    const raw = await input.generateWithOllama({
+    const raw = await input.generateWithModel({
       task,
       schema: EXTRACTION_SCHEMA as unknown as JsonObject,
       temperature: input.temperature,
@@ -337,10 +337,10 @@ function buildGenerationTask(input: {
   previousError: string | null
 }) {
   const structures = input.policy?.preferredStructures ?? {
-    melodic: ['Hook', 'Verse 1', 'Pre-Hook', 'Hook', 'Verse 2', 'Hook', 'Outro'],
-    fast: ['Verse 1', 'Hook', 'Verse 2', 'Hook', 'Outro'],
-    hybrid: ['Hook', 'Verse 1', 'Pre-Hook', 'Hook', 'Verse 2', 'Bridge', 'Outro'],
-    remix: ['Verse 1', 'Hook', 'Verse 2', 'Bridge', 'Hook', 'Outro'],
+    melodic: ['Intro', 'Hook', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Outro'],
+    fast: ['Verse 1', 'Hook', 'Verse 2', 'Hook', 'Bridge', 'Outro'],
+    hybrid: ['Intro', 'Hook', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Outro'],
+    remix: ['Intro', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Hook', 'Outro'],
   }
   const skeletons = buildStructureSkeletons(input.extraction, input.transcript, structures)
 
@@ -363,28 +363,32 @@ function buildGenerationTask(input: {
     '',
     'Rules:',
     '- Use provided hook_lines and verse_lines first',
-    '- Do NOT rewrite original lines unless unusable',
+    '- Do NOT rewrite original lines unless they are clearly broken or unusable',
     '- Reorder before inventing',
-    '- Hooks must come from hook_lines',
-    '- Verses must come from verse_lines with minimal changes',
+    '- Hooks must come from hook_lines and should feel chantable, sticky, and complete',
+    '- Verses must come from verse_lines with minimal changes and must read like finished bars',
     '- You may add at most 1-2 connective lines per section',
-    '- Do NOT use generic rap filler or cliche phrases',
+    '- Do NOT use generic rap filler, cliche phrases, or unfinished clauses',
     '- Preserve slang, tone, and raw phrasing',
     '- Avoid excessive repetition',
     '- Ensure output is a complete song, not a loop',
-    '- If the transcript is rich, expand into two real verses and hook returns instead of collapsing the source',
-    '- No verse may reuse more than 40% of its own line bodies',
+    '- Every version must feel usable, recordable, and commercially believable',
+    '- If the transcript is rich, expand into two real verses, a real bridge, hook returns, and a landing outro instead of collapsing the source',
+    '- No verse may reuse more than 35% of its own line bodies',
+    '- Do not end bars on incomplete fragments like "when I", "to the", "with my", or similar cut-offs',
     '- Highlight bars must appear unchanged in hook openings, verse openings, or verse closers',
-    '- Rich transcripts should land in the 10 to 16 line range per version',
+    '- Rich transcripts should land in the 18 to 24 line range per version',
     '- versions must not be near-duplicates of each other',
-    '- Use modern section labels where they fit: Verse 1, Pre-Hook, Hook, Verse 2, Bridge, Outro',
+    '- Use modern section labels where they fit: Intro, Verse 1, Hook, Verse 2, Bridge, Outro',
     '- Return readable line-broken lyrics, never paragraphs',
     '',
     'Structure:',
+    'Intro (optional)',
     'Hook',
-    'Verse',
-    'Hook',
-    'Verse',
+    'Verse 1',
+    'Hook return',
+    'Bridge',
+    'Verse 2',
     'Outro',
     '',
     `Style wrappers:\n${JSON.stringify(input.instructions, null, 2)}`,
@@ -435,6 +439,7 @@ function evaluateFreestyleQuality(
     const lines = normalizeLyricLines(lyrics)
     const comparableLines = comparableLineSequence(lyrics)
     const uniqueComparableLines = new Set(comparableLines)
+    const sectionReport = assessStructuredVersion(lyrics)
     const phraseRetention = phrasePool.length === 0 ? 1 : countPhraseMatches(lyrics, phrasePool) / phrasePool.length
     const termRetention = computeTermOverlap(sourceTerms, lyrics)
     const slangRetention =
@@ -463,6 +468,7 @@ function evaluateFreestyleQuality(
       repetitionDensity,
       verseReuseRatio,
       lineCountDiscipline,
+      sectionReport,
     }
   })
 
@@ -524,7 +530,7 @@ function evaluateFreestyleQuality(
     errors.push(`Too many invented connective lines: max ${maxConnectiveLines}, saw ${maxConnectiveUsed}`)
   }
 
-  if (averageLineCountDiscipline < 0.82 || averageLineCount < targetLineRange[0]) {
+  if (averageLineCountDiscipline < 0.9 || averageLineCount < targetLineRange[0]) {
     errors.push(`Arrangement too thin: average version only produced ${averageLineCount.toFixed(1)} lines`)
   }
 
@@ -552,7 +558,7 @@ function evaluateFreestyleQuality(
     )
   }
 
-  if (maxRepeatedLineRatio > 0.24) {
+  if (maxRepeatedLineRatio > 0.28) {
     errors.push(
       `Section repetition too high: worst version repeated ${(maxRepeatedLineRatio * 100).toFixed(1)}% of its line bodies`,
     )
@@ -564,7 +570,7 @@ function evaluateFreestyleQuality(
     )
   }
 
-  if (maxVerseReuseRatio > 0.4) {
+  if (maxVerseReuseRatio > 0.28) {
     errors.push(
       `Verse duplication too high: worst verse reused ${(maxVerseReuseRatio * 100).toFixed(1)}% of its own lines`,
     )
@@ -576,6 +582,12 @@ function evaluateFreestyleQuality(
 
   if (fillerPenalty > 1) {
     errors.push(`Generic filler detected too often: ${fillerPenalty} filler-pattern hits`)
+  }
+
+  for (const item of perVersion) {
+    if (!item.sectionReport.valid && item.sectionReport.error) {
+      errors.push(item.sectionReport.error)
+    }
   }
 
   return {
@@ -727,6 +739,89 @@ function normalizeLyricLines(lyrics: string) {
     .filter(Boolean)
 }
 
+function assessStructuredVersion(lyrics: string) {
+  const parsed = parseStructuredLyrics(lyrics)
+  const lineCount = parsed.lines.length
+  const hookLineCount = parsed.sectionCounts.get('Hook') ?? 0
+  const verseOneLineCount = parsed.sectionCounts.get('Verse 1') ?? 0
+  const verseTwoLineCount = parsed.sectionCounts.get('Verse 2') ?? 0
+  const bridgeLineCount = parsed.sectionCounts.get('Bridge') ?? 0
+  const outroLineCount = parsed.sectionCounts.get('Outro') ?? 0
+  const verseSectionCount = parsed.verseLabels.size
+  const clippedNarrativeLineCount = parsed.clippedNarrativeLineCount
+
+  if (lineCount < 18) {
+    return { valid: false, error: `Arrangement too thin: structured version only produced ${lineCount} lines` }
+  }
+  if (hookLineCount < 6) {
+    return { valid: false, error: `Hook coverage too low: structured version only delivered ${hookLineCount} hook lines` }
+  }
+  if (verseSectionCount < 2) {
+    return { valid: false, error: `Structure incomplete: expected 2 verse sections, saw ${verseSectionCount}` }
+  }
+  if (verseOneLineCount < 5) {
+    return { valid: false, error: `Verse 1 too short: structured version only delivered ${verseOneLineCount} lines` }
+  }
+  if (verseTwoLineCount < 5) {
+    return { valid: false, error: `Verse 2 too short: structured version only delivered ${verseTwoLineCount} lines` }
+  }
+  if (bridgeLineCount < 3) {
+    return { valid: false, error: `Bridge too short: structured version only delivered ${bridgeLineCount} lines` }
+  }
+  if (outroLineCount < 2) {
+    return { valid: false, error: `Outro too short: structured version only delivered ${outroLineCount} lines` }
+  }
+  if (clippedNarrativeLineCount > 0) {
+    return { valid: false, error: `Fragment bars detected: structured version still contains ${clippedNarrativeLineCount} clipped narrative lines` }
+  }
+
+  return { valid: true }
+}
+
+function parseStructuredLyrics(lyrics: string) {
+  const lines = normalizeLyricLines(lyrics)
+  const sectionCounts = new Map<string, number>()
+  const verseLabels = new Set<string>()
+  let clippedNarrativeLineCount = 0
+  let verseFallbackIndex = 1
+
+  for (const line of lines) {
+    const match = line.match(/^([A-Za-z0-9 ]+):\s*(.*)$/)
+    const rawLabel = match?.[1]?.trim() ?? ''
+    const body = stripSectionLabels(line)
+    const canonical = normalizeStructuredSectionLabel(rawLabel, verseFallbackIndex)
+    if (canonical === 'Verse 1') {
+      verseFallbackIndex = 2
+    }
+    if (canonical.startsWith('Verse')) {
+      verseLabels.add(canonical)
+    }
+    if ((canonical.startsWith('Verse') || canonical === 'Bridge') && isClippedNarrativeLine(body)) {
+      clippedNarrativeLineCount += 1
+    }
+    sectionCounts.set(canonical, (sectionCounts.get(canonical) ?? 0) + 1)
+  }
+
+  return {
+    lines,
+    sectionCounts,
+    verseLabels,
+    clippedNarrativeLineCount,
+  }
+}
+
+function normalizeStructuredSectionLabel(rawLabel: string, verseFallbackIndex: number) {
+  const normalized = rawLabel.toLowerCase()
+  if (normalized.startsWith('intro')) return 'Intro'
+  if (normalized.startsWith('hook')) return 'Hook'
+  if (normalized.startsWith('bridge')) return 'Bridge'
+  if (normalized.startsWith('outro')) return 'Outro'
+  if (normalized.startsWith('verse 2') || normalized === 'verse2') return 'Verse 2'
+  if (normalized.startsWith('verse 1') || normalized === 'verse1') return 'Verse 1'
+  if (normalized.startsWith('verse')) return verseFallbackIndex > 1 ? 'Verse 2' : 'Verse 1'
+  return 'Verse 1'
+}
+
 function isNearSourceLine(line: string, extraction: ExtractionResult) {
   const comparable = stripSectionLabels(line).toLowerCase()
   const sourcePool = buildSourceArrangementLines(extraction)
@@ -850,29 +945,29 @@ function buildStructureSkeletons(
   const sourceRichness = sourceLines.length
   const transcriptWordCount = Math.max(countWords(transcript), 1)
   const targetLineRange = deriveTargetLineCountRange(transcriptWordCount, sourceRichness)
-  const verseLineCount = targetLineRange[0] >= 12 ? 4 : 3
+  const verseLineCount = targetLineRange[0] >= 18 ? 6 : targetLineRange[0] >= 16 ? 5 : 4
   const sharedHookPool = fuzzyUnique([
     ...extraction.highlightBars.filter((line) => countWords(line) <= 9),
     ...extraction.hookCandidates,
     ...sourceLines,
-  ]).slice(0, 4)
+  ]).slice(0, 6)
   const sharedVersePool = fuzzyUnique([
     ...extraction.highlightBars,
     ...extraction.verseCandidates,
     ...extraction.discardCandidates,
     ...extraction.reusableLines,
     ...sourceLines,
-  ]).slice(0, 16)
+  ]).slice(0, 20)
   const highlightBars = fuzzyUnique([
     ...extraction.highlightBars,
     ...sharedHookPool,
     ...sharedVersePool,
   ]).slice(0, 2)
   const structures = preferredStructures ?? {
-    melodic: ['Hook', 'Verse 1', 'Pre-Hook', 'Hook', 'Verse 2', 'Hook', 'Outro'],
-    fast: ['Verse 1', 'Hook', 'Verse 2', 'Hook', 'Outro'],
-    hybrid: ['Hook', 'Verse 1', 'Pre-Hook', 'Hook', 'Verse 2', 'Bridge', 'Outro'],
-    remix: ['Verse 1', 'Hook', 'Verse 2', 'Bridge', 'Hook', 'Outro'],
+    melodic: ['Intro', 'Hook', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Outro'],
+    fast: ['Verse 1', 'Hook', 'Verse 2', 'Hook', 'Bridge', 'Outro'],
+    hybrid: ['Intro', 'Hook', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Outro'],
+    remix: ['Intro', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Hook', 'Outro'],
   }
 
   const verseExpansionPool = buildVerseExpansionPool(sharedVersePool, sharedHookPool)
@@ -891,9 +986,9 @@ function buildStructureSkeletons(
   return {
     melodic: {
       style: 'melodic',
-      structure: structures.melodic ?? ['Hook', 'Verse 1', 'Pre-Hook', 'Hook', 'Verse 2', 'Hook', 'Outro'],
-      hook_lines: takeDistinctLines(sharedHookPool, 3),
-      verse_lines: takeDistinctLines(rankedVersePool, 10),
+      structure: structures.melodic ?? ['Intro', 'Hook', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Outro'],
+      hook_lines: takeDistinctLines(sharedHookPool, 4),
+      verse_lines: takeDistinctLines(rankedVersePool, 14),
       verse_one_lines: verseOneSeed,
       verse_two_lines: verseTwoSeed,
       highlight_bars: highlightBars,
@@ -903,9 +998,9 @@ function buildStructureSkeletons(
     },
     fast: {
       style: 'fast',
-      structure: structures.fast ?? ['Verse 1', 'Hook', 'Verse 2', 'Hook', 'Outro'],
-      hook_lines: takeDistinctLines(sharedHookPool, 2),
-      verse_lines: takeDistinctLines(rankedVersePool, 12),
+      structure: structures.fast ?? ['Verse 1', 'Hook', 'Verse 2', 'Hook', 'Bridge', 'Outro'],
+      hook_lines: takeDistinctLines(sharedHookPool, 4),
+      verse_lines: takeDistinctLines(rankedVersePool, 16),
       verse_one_lines: takeDistinctLines([highlightBars[0], ...rankedVersePool], verseLineCount + 1, sharedHookPool),
       verse_two_lines: takeDistinctLines(
         [highlightBars[1], ...rankedVersePool.slice(verseLineCount), ...rankedVersePool],
@@ -919,9 +1014,9 @@ function buildStructureSkeletons(
     },
     hybrid: {
       style: 'hybrid',
-      structure: structures.hybrid ?? ['Hook', 'Verse 1', 'Pre-Hook', 'Hook', 'Verse 2', 'Bridge', 'Outro'],
-      hook_lines: takeDistinctLines(sharedHookPool, 2),
-      verse_lines: takeDistinctLines(rankedVersePool, 10),
+      structure: structures.hybrid ?? ['Intro', 'Hook', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Outro'],
+      hook_lines: takeDistinctLines(sharedHookPool, 4),
+      verse_lines: takeDistinctLines(rankedVersePool, 14),
       verse_one_lines: verseOneSeed,
       verse_two_lines: verseTwoSeed,
       highlight_bars: highlightBars,
@@ -931,9 +1026,9 @@ function buildStructureSkeletons(
     },
     remix: {
       style: 'remix',
-      structure: structures.remix ?? ['Verse 1', 'Hook', 'Verse 2', 'Bridge', 'Hook', 'Outro'],
-      hook_lines: takeDistinctLines(sharedHookPool.slice().reverse(), 2),
-      verse_lines: takeDistinctLines([...rankedVersePool.slice().reverse(), ...rankedVersePool], 10),
+      structure: structures.remix ?? ['Intro', 'Verse 1', 'Hook', 'Bridge', 'Verse 2', 'Hook', 'Outro'],
+      hook_lines: takeDistinctLines(sharedHookPool.slice().reverse(), 4),
+      verse_lines: takeDistinctLines([...rankedVersePool.slice().reverse(), ...rankedVersePool], 14),
       verse_one_lines: takeDistinctLines([highlightBars[0], ...rankedVersePool.slice().reverse()], verseLineCount, sharedHookPool),
       verse_two_lines: takeDistinctLines(
         [highlightBars[1], ...rankedVersePool, ...rankedVersePool.slice().reverse()],
@@ -1025,7 +1120,13 @@ function containsNearDuplicate(values: string[], candidate: string) {
   )
 }
 
-function takeDistinctLines(pool: Array<string | undefined>, count: number, exclude: string[] = [], minWords = 1) {
+function takeDistinctLines(
+  pool: Array<string | undefined>,
+  count: number,
+  exclude: string[] = [],
+  minWords = 1,
+  allowReuse = false,
+) {
   const picked: string[] = []
   const blocked = exclude.filter(Boolean)
 
@@ -1043,6 +1144,22 @@ function takeDistinctLines(pool: Array<string | undefined>, count: number, exclu
     }
   }
 
+  if (allowReuse && picked.length < count) {
+    for (const candidate of pool) {
+      if (!candidate) {
+        continue
+      }
+      const sanitized = sanitizeLine(candidate)
+      if (!sanitized || countWords(sanitized) < minWords || containsNearDuplicate(picked, sanitized)) {
+        continue
+      }
+      picked.push(sanitized)
+      if (picked.length >= count) {
+        break
+      }
+    }
+  }
+
   return picked
 }
 
@@ -1055,7 +1172,7 @@ function ensureVerseHighlight(
 ) {
   const verse = takeDistinctLines([highlightBar, ...verseLines, ...fallbackPool], minimumCount, exclude, 4)
   if (verse.length < minimumCount) {
-    return takeDistinctLines([highlightBar, ...verse, ...fallbackPool], minimumCount, exclude, 4)
+    return takeDistinctLines([highlightBar, ...verse, ...fallbackPool], minimumCount, exclude, 4, true)
   }
   return verse
 }
@@ -1069,7 +1186,7 @@ function ensureVerseDensity(
   if (verseLines.length >= minimumCount) {
     return verseLines
   }
-  return takeDistinctLines([...verseLines, ...fallbackPool], minimumCount, exclude, 4)
+  return takeDistinctLines([...verseLines, ...fallbackPool], minimumCount, exclude, 4, true)
 }
 
 function balanceVerseSection(lines: string[], hookLines: string[]) {
@@ -1158,7 +1275,7 @@ function extractVerseFragments(line: string) {
 
   return clauses
     .map((candidate) => sanitizeLine(candidate))
-    .filter((candidate) => countWords(candidate) >= 4 && countWords(candidate) <= 12)
+    .filter((candidate) => countWords(candidate) >= 4 && countWords(candidate) <= 16)
     .filter((candidate) => isRecordableVerseLine(candidate))
     .filter((candidate, index, pool) => {
       return !pool.some(
@@ -1207,7 +1324,7 @@ function stitchSourceLines(primary?: string, secondary?: string) {
   }
 
   const stitched = `${left}, ${right}`
-  if (countWords(stitched) > 12) {
+  if (countWords(stitched) > 16) {
     return countWords(left) >= countWords(right) ? left : right
   }
   if (countWords(stitched) < 6) {
@@ -1357,11 +1474,22 @@ function buildVariantLines(
       ...sourceLines,
       ...compositePool,
     ],
+    4,
+    [],
+    4,
+  )
+  const introLines = takeDistinctLines(
+    [
+      ...skeleton.highlight_bars,
+      ...hookLines,
+      ...sourceLines,
+      ...verseExpansionPool,
+    ],
     2,
     [],
     4,
   )
-  const verseTarget = Math.min(5, skeleton.minimum_unique_verse_lines + (style === 'fast' ? 1 : 0))
+  const verseTarget = Math.min(6, skeleton.minimum_unique_verse_lines + (style === 'fast' ? 1 : 0))
   const verseOne = balanceVerseSection(ensureVerseDensity(ensureVerseHighlight(
     skeleton.verse_one_lines,
     skeleton.highlight_bars[0] ?? hookLines[0] ?? sourceLines[0],
@@ -1384,28 +1512,36 @@ function buildVariantLines(
       ...sourceLines,
     ],
     2,
-    [...hookLines, ...verseOne, ...verseTwo],
+    [...introLines, ...hookLines, ...verseOne, ...verseTwo],
     4,
   )
-  const bridgeLines = takeDistinctLines(
-    [
-      ...compositePool.slice().reverse(),
-      ...verseExpansionPool.slice().reverse(),
+    const bridgeLines = takeDistinctLines(
+      [
+        ...compositePool.slice().reverse(),
+        ...verseExpansionPool.slice().reverse(),
+        ...sourceLines.slice().reverse(),
+        ...skeleton.verse_lines.slice().reverse(),
+      ],
+      3,
+      [...introLines, ...hookLines, ...verseOne, ...verseTwo],
+      4,
+      true,
+    )
+    const outroLines = takeDistinctLines(
+      [
+        ...bridgeLines.slice().reverse(),
+        ...preHookLines.slice().reverse(),
       ...sourceLines.slice().reverse(),
-      ...skeleton.verse_lines.slice().reverse(),
-    ],
-    2,
-    [...hookLines, ...verseOne, ...verseTwo],
-    4,
-  )
-  const outroLines = takeDistinctLines(
-    [...bridgeLines.slice().reverse(), ...preHookLines.slice().reverse(), ...sourceLines.slice().reverse()],
-    1,
-    [...hookLines, ...verseOne, ...verseTwo, ...bridgeLines],
-    4,
-  )
+      ...verseExpansionPool.slice().reverse(),
+      ],
+      2,
+      [...introLines, ...hookLines, ...verseOne, ...verseTwo, ...bridgeLines],
+      4,
+      true,
+    )
 
   const sectionPools = {
+    Intro: introLines,
     Hook: hookLines,
     'Verse 1': verseOne,
     'Verse 2': verseTwo,
@@ -1427,6 +1563,7 @@ function buildVariantLines(
 function planSectionTargets(
   skeleton: StructureSkeleton,
   sectionPools: {
+    Intro: string[]
     Hook: string[]
     'Verse 1': string[]
     'Verse 2': string[]
@@ -1441,22 +1578,24 @@ function planSectionTargets(
   }
 
   const targets = new Map<string, number>([
-    ['Hook', Math.min(sectionPools.Hook.length, sectionPools.Hook.length >= 3 && sectionOccurrences.get('Hook') === 1 ? 3 : 2)],
+    ['Intro', Math.min(sectionPools.Intro.length, sectionPools.Intro.length >= 2 ? 2 : 1)],
+    ['Hook', Math.min(sectionPools.Hook.length, sectionPools.Hook.length >= 3 ? 3 : 2)],
     ['Verse 1', Math.min(sectionPools['Verse 1'].length, Math.max(skeleton.minimum_unique_verse_lines, sectionPools['Verse 1'].length))],
     ['Verse 2', Math.min(sectionPools['Verse 2'].length, Math.max(skeleton.minimum_unique_verse_lines, sectionPools['Verse 2'].length))],
     ['Pre-Hook', Math.min(sectionPools['Pre-Hook'].length, 2)],
-    ['Bridge', Math.min(sectionPools.Bridge.length, 2)],
-    ['Outro', Math.min(sectionPools.Outro.length, 1)],
+    ['Bridge', Math.min(sectionPools.Bridge.length, 3)],
+    ['Outro', Math.min(sectionPools.Outro.length, 2)],
   ])
 
   const minimums = new Map<string, number>([
-    ['Hook', sectionOccurrences.get('Hook') ? 2 : 0],
-    ['Verse 1', sectionOccurrences.get('Verse 1') ? skeleton.minimum_unique_verse_lines : 0],
-    ['Verse 2', sectionOccurrences.get('Verse 2') ? skeleton.minimum_unique_verse_lines : 0],
-    ['Pre-Hook', sectionOccurrences.get('Pre-Hook') ? 1 : 0],
-    ['Bridge', sectionOccurrences.get('Bridge') ? 1 : 0],
-    ['Outro', sectionOccurrences.get('Outro') ? 1 : 0],
-  ])
+    ['Intro', sectionOccurrences.get('Intro') ? 1 : 0],
+    ['Hook', sectionOccurrences.get('Hook') ? 3 : 0],
+      ['Verse 1', sectionOccurrences.get('Verse 1') ? skeleton.minimum_unique_verse_lines : 0],
+      ['Verse 2', sectionOccurrences.get('Verse 2') ? skeleton.minimum_unique_verse_lines : 0],
+      ['Pre-Hook', sectionOccurrences.get('Pre-Hook') ? 1 : 0],
+      ['Bridge', sectionOccurrences.get('Bridge') ? 3 : 0],
+      ['Outro', sectionOccurrences.get('Outro') ? 2 : 0],
+    ])
 
   const totalLines = () =>
     Array.from(sectionOccurrences.entries()).reduce(
@@ -1464,8 +1603,8 @@ function planSectionTargets(
       0,
     )
 
-  const shrinkOrder = ['Pre-Hook', 'Bridge', 'Verse 2', 'Verse 1', 'Hook']
-  const growOrder = ['Verse 1', 'Verse 2', 'Bridge', 'Pre-Hook', 'Hook']
+  const shrinkOrder = ['Intro', 'Pre-Hook', 'Bridge', 'Verse 2', 'Verse 1', 'Hook']
+  const growOrder = ['Verse 1', 'Verse 2', 'Bridge', 'Hook', 'Outro', 'Intro', 'Pre-Hook']
   const [, maximum] = skeleton.target_line_range
   const [minimum] = skeleton.target_line_range
 
@@ -1524,21 +1663,21 @@ function expandArrangementFragments(line: string) {
 
 function canRecoverWithDeterministicArrangement(errors: string[]) {
   return errors.some((error) =>
-    /Too many invented connective lines|Arrangement too thin|Versions too similar|Hook reuse too weak|Compression too high|Structural richness too low|Section repetition too high|Source coverage too low|Repetition density too high|Verse duplication too high/i.test(error),
+    /Too many invented connective lines|Arrangement too thin|Versions too similar|Hook reuse too weak|Compression too high|Structural richness too low|Section repetition too high|Source coverage too low|Repetition density too high|Verse duplication too high|Hook coverage too low|Structure incomplete|Verse 1 too short|Verse 2 too short|Bridge too short|Outro too short|Fragment bars detected/i.test(error),
   )
 }
 
 function isUsableFragment(line: string) {
   const words = line.split(/\s+/).filter(Boolean)
   const firstWord = words[0]?.toLowerCase() ?? ''
-  const lastWord = words.at(-1)?.toLowerCase() ?? ''
   if (words.length < 4) {
     return false
   }
 
   return (
-    !/^(to|into|with|and|but|before|after|while|trying)$/i.test(firstWord) &&
-    !/^(to|into|with|and|but|before|after|while|trying|make|turn|when|had|hold)$/i.test(lastWord)
+    !/^(to|into|with|and|but|before|after|while|trying|the)$/i.test(firstWord) &&
+    !startsMidSentenceFragment(line) &&
+    !isClippedNarrativeLine(line)
   )
 }
 
@@ -1546,21 +1685,43 @@ function isRecordableVerseLine(line: string) {
   const sanitized = sanitizeLine(line)
   const words = sanitized.split(/\s+/).filter(Boolean)
   const firstWord = words[0]?.toLowerCase() ?? ''
-  const lastWord = words.at(-1)?.toLowerCase() ?? ''
 
-  if (words.length < 4 || words.length > 12) {
+  if (words.length < 4 || words.length > 16) {
     return false
   }
 
-  if (/^(and|but|with|to|into|while|because|cause)$/i.test(firstWord)) {
+  if (/^(and|but|with|to|into|while|because|cause|the)$/i.test(firstWord)) {
     return false
   }
 
-  if (/^(to|into|with|and|but|before|after|while|trying|make|turn|when|had|hold)$/i.test(lastWord)) {
+  if (startsMidSentenceFragment(sanitized)) {
     return false
   }
 
-  return /[aeiouy]/i.test(lastWord)
+  if (isClippedNarrativeLine(sanitized)) {
+    return false
+  }
+
+  return /[aeiouy]/i.test(words.at(-1) ?? '')
+}
+
+function isClippedNarrativeLine(line: string) {
+  const sanitized = sanitizeLine(line).toLowerCase()
+  if (!sanitized) {
+    return true
+  }
+
+  return (
+    /\b(?:when|to|with|for|from|in|on|at|under|over|like)\s+(?:i|you|we|they|he|she|it|the|my|your|our|their)$/i.test(sanitized) ||
+    /\b(?:to|into|with|and|but|before|after|while|trying|make|turn|when|had|hold|i|the)$/i.test(sanitized) ||
+    /^(?:the|when|with|to)\b/i.test(sanitized)
+  )
+}
+
+function startsMidSentenceFragment(line: string) {
+  const sanitized = sanitizeLine(line)
+  const firstCharacter = sanitized.charAt(0)
+  return Boolean(firstCharacter) && firstCharacter === firstCharacter.toLowerCase() && firstCharacter !== 'i'
 }
 
 function scoreArrangementLine(line: string) {
@@ -1637,9 +1798,9 @@ function deriveTargetUniqueLinesPerVersion(sourceRichness: number, transcriptWor
 }
 
 function deriveTargetLineCountRange(transcriptWordCount: number, sourceRichness: number): [number, number] {
-  if (transcriptWordCount >= 30 || sourceRichness >= 10) return [12, 16]
-  if (transcriptWordCount >= 18 || sourceRichness >= 6) return [10, 14]
-  return [8, 12]
+  if (transcriptWordCount >= 30 || sourceRichness >= 10) return [20, 24]
+  if (transcriptWordCount >= 18 || sourceRichness >= 6) return [18, 22]
+  return [16, 20]
 }
 
 function computeStructuralRichness(lyrics: string, sourceRichness: number, transcriptWordCount = 0) {

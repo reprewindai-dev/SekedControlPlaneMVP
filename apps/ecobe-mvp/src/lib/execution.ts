@@ -1,4 +1,4 @@
-import { env } from './env'
+import { env, providerConfigured } from './env'
 import { validateAgainstSchema } from './json-schema'
 import { executeFreestyleWriterPipeline } from './freestyle-writer-pipeline'
 
@@ -20,7 +20,33 @@ type ExecutionPayload = {
   operation?: string
 }
 
-export async function executeGovernedPayload(payload: ExecutionPayload): Promise<GenerationResult> {
+type ExecutionRoute = {
+  selectedProvider?: string | null
+  selectedRegion?: string | null
+}
+
+type SupportedProvider = 'groq' | 'ollama'
+
+type ModelInput = {
+  task: string
+  schema?: Record<string, any>
+  temperature: number
+}
+
+type ExecutionRuntime = {
+  provider: SupportedProvider
+  model: string
+  region: string | null
+}
+
+const GOVERNED_SYSTEM_PROMPT =
+  'You are the execution layer for a governed production control plane. Return valid JSON only, follow the provided schema exactly, preserve the source voice, preserve slang and emotional tone, prioritize preservation over novelty, and do not add markdown fences.'
+const OLLAMA_REQUEST_TIMEOUT_MS = 240_000
+
+export async function executeGovernedPayload(
+  payload: ExecutionPayload,
+  route: ExecutionRoute = {},
+): Promise<GenerationResult> {
   const prompt = String(payload.input?.prompt ?? '').trim()
   const schema = payload.schema as Record<string, any> | undefined
   const transcript = String(payload.input?.transcript ?? '').trim()
@@ -32,14 +58,13 @@ export async function executeGovernedPayload(payload: ExecutionPayload): Promise
       schemaValid: true,
       qualityScore: 100,
       finalDecision: 'accepted',
-      model: env.OLLAMA_MODEL,
+      model: 'passthrough',
       provider: 'passthrough',
     }
   }
 
-  if (!env.OLLAMA_BASE_URL) {
-    throw new Error('OLLAMA_BASE_URL is required for governed generation')
-  }
+  const runtime = resolveExecutionRuntime(route)
+  const generateWithModel = createModelGenerator(runtime)
 
   if (isFreestyleWriterPayload(payload)) {
     const freestyleResult = await executeFreestyleWriterPipeline({
@@ -48,10 +73,10 @@ export async function executeGovernedPayload(payload: ExecutionPayload): Promise
       schema,
       temperature: payload.temperature ?? 0.55,
       maxAttempts: env.OLLAMA_MAX_ATTEMPTS,
-      model: env.OLLAMA_MODEL,
+      model: runtime.model,
       preservationPolicy: (payload.input?.preservationPolicy as Record<string, any> | undefined) ?? {},
       artistMemory: (payload.input?.artistMemory as Record<string, unknown> | undefined) ?? undefined,
-      generateWithOllama,
+      generateWithModel,
     })
 
     return {
@@ -60,8 +85,8 @@ export async function executeGovernedPayload(payload: ExecutionPayload): Promise
       schemaValid: freestyleResult.schemaValid,
       qualityScore: freestyleResult.qualityScore,
       finalDecision: freestyleResult.finalDecision,
-      model: env.OLLAMA_MODEL,
-      provider: 'ollama',
+      model: runtime.model,
+      provider: runtime.provider,
       error: freestyleResult.error,
     }
   }
@@ -74,7 +99,7 @@ export async function executeGovernedPayload(payload: ExecutionPayload): Promise
     const task = attempt === 1 ? baseTask : `${baseTask}\n\nPrevious validation error: ${lastError}\nReturn corrected JSON only.`
 
     try {
-      const rawContent = await generateWithOllama({
+      const rawContent = await generateWithModel({
         task,
         schema,
         temperature: payload.temperature ?? 0.65,
@@ -91,8 +116,8 @@ export async function executeGovernedPayload(payload: ExecutionPayload): Promise
           schemaValid: true,
           qualityScore: Math.max(72, Math.round((preservation.score + 96 - (attempt - 1) * 6) / 2)),
           finalDecision: 'accepted',
-          model: env.OLLAMA_MODEL,
-          provider: 'ollama',
+          model: runtime.model,
+          provider: runtime.provider,
         }
       }
 
@@ -108,10 +133,95 @@ export async function executeGovernedPayload(payload: ExecutionPayload): Promise
     schemaValid: false,
     qualityScore: 0,
     finalDecision: 'rejected',
-    model: env.OLLAMA_MODEL,
-    provider: 'ollama',
+    model: runtime.model,
+    provider: runtime.provider,
     error: lastError,
   }
+}
+
+export function getExecutionHealth() {
+  const configuredProviders: Array<{ provider: SupportedProvider; model: string }> = []
+
+  if (providerConfigured('groq')) {
+    configuredProviders.push({
+      provider: 'groq',
+      model: env.GROQ_MODEL,
+    })
+  }
+
+  if (providerConfigured('ollama')) {
+    configuredProviders.push({
+      provider: 'ollama',
+      model: env.OLLAMA_MODEL,
+    })
+  }
+
+  return {
+    status: configuredProviders.length > 0 ? 'healthy' : 'not_configured',
+    configuredProviders,
+    defaultProvider: configuredProviders.length === 1 ? configuredProviders[0].provider : null,
+    routeRequirement: configuredProviders.length > 1 ? 'explicit_provider_required' : 'single_provider_ok',
+  }
+}
+
+function resolveExecutionRuntime(route: ExecutionRoute): ExecutionRuntime {
+  const routedProvider = normalizeProvider(route.selectedProvider)
+
+  if (routedProvider) {
+    if (!providerConfigured(routedProvider)) {
+      throw new Error(`Routed provider ${routedProvider} is not configured for governed generation`)
+    }
+
+    return {
+      provider: routedProvider,
+      model: routedProvider === 'groq' ? env.GROQ_MODEL : env.OLLAMA_MODEL,
+      region: route.selectedRegion ?? null,
+    }
+  }
+
+  const health = getExecutionHealth()
+
+  if (health.configuredProviders.length === 0) {
+    throw new Error('No governed execution provider is configured')
+  }
+
+  if (health.configuredProviders.length > 1) {
+    throw new Error('Routed provider is required when multiple governed execution providers are configured')
+  }
+
+  const [singleProvider] = health.configuredProviders
+
+  return {
+    provider: singleProvider.provider,
+    model: singleProvider.model,
+    region: route.selectedRegion ?? null,
+  }
+}
+
+function normalizeProvider(value: string | null | undefined): SupportedProvider | null {
+  const normalized = String(value ?? '').trim().toLowerCase()
+
+  if (!normalized) {
+    return null
+  }
+
+  if (normalized.includes('groq') || normalized === 'grok') {
+    return 'groq'
+  }
+
+  if (normalized.includes('ollama')) {
+    return 'ollama'
+  }
+
+  throw new Error(`Unsupported routed provider "${value}"`)
+}
+
+function createModelGenerator(runtime: ExecutionRuntime) {
+  if (runtime.provider === 'groq') {
+    return async (input: ModelInput) => generateWithGroq(input, runtime)
+  }
+
+  return async (input: ModelInput) => generateWithOllama(input, runtime)
 }
 
 function isFreestyleWriterPayload(payload: ExecutionPayload) {
@@ -129,30 +239,22 @@ function isFreestyleWriterPayload(payload: ExecutionPayload) {
   )
 }
 
-async function generateWithOllama(input: {
-  task: string
-  schema?: Record<string, any>
-  temperature: number
-}) {
-  const response = await fetch(`${env.OLLAMA_BASE_URL}/api/chat`, {
+async function generateWithGroq(input: ModelInput, runtime: ExecutionRuntime) {
+  const response = await fetch(`${env.GROQ_BASE_URL}/chat/completions`, {
     method: 'POST',
     cache: 'no-store',
     headers: {
+      authorization: `Bearer ${env.GROQ_API_KEY}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: env.OLLAMA_MODEL,
-      stream: false,
-      format: input.schema ?? 'json',
-      options: {
-        temperature: input.temperature,
-        num_predict: env.OLLAMA_NUM_PREDICT,
-      },
+      model: runtime.model,
+      temperature: input.temperature,
+      response_format: { type: 'json_object' },
       messages: [
         {
           role: 'system',
-          content:
-            'You are the execution layer for a governed production control plane. Return valid JSON only, follow the provided schema exactly, preserve the source voice, preserve slang and emotional tone, prioritize preservation over novelty, and do not add markdown fences.',
+          content: GOVERNED_SYSTEM_PROMPT,
         },
         {
           role: 'user',
@@ -163,17 +265,79 @@ async function generateWithOllama(input: {
   })
 
   if (!response.ok) {
-    throw new Error(`Ollama request failed with ${response.status}: ${await response.text()}`)
+    throw new Error(`Groq request failed with ${response.status}: ${await response.text()}`)
   }
 
   const data = await response.json()
-  const content = data?.message?.content
+  const content = data?.choices?.[0]?.message?.content
 
   if (!content || typeof content !== 'string') {
-    throw new Error('Ollama returned an empty response')
+    throw new Error('Groq returned an empty response')
   }
 
   return content
+}
+
+async function generateWithOllama(input: ModelInput, runtime: ExecutionRuntime) {
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), OLLAMA_REQUEST_TIMEOUT_MS)
+
+    try {
+      const response = await fetch(`${env.OLLAMA_BASE_URL}/api/chat`, {
+        method: 'POST',
+        cache: 'no-store',
+        signal: controller.signal,
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: runtime.model,
+          stream: false,
+          format: input.schema ?? 'json',
+          options: {
+            temperature: input.temperature,
+            num_predict: env.OLLAMA_NUM_PREDICT,
+          },
+          messages: [
+            {
+              role: 'system',
+              content: GOVERNED_SYSTEM_PROMPT,
+            },
+            {
+              role: 'user',
+              content: input.task,
+            },
+          ],
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Ollama request failed with ${response.status}: ${await response.text()}`)
+      }
+
+      const data = await response.json()
+      const content = data?.message?.content
+
+      if (!content || typeof content !== 'string') {
+        throw new Error('Ollama returned an empty response')
+      }
+
+      return content
+    } finally {
+      clearTimeout(timeout)
+    }
+  } catch (error) {
+    if (providerConfigured('groq')) {
+      return await generateWithGroq(input, {
+        provider: 'groq',
+        model: env.GROQ_MODEL,
+        region: 'fallback',
+      })
+    }
+
+    throw error
+  }
 }
 
 function evaluatePreservation(output: unknown, transcript: string) {

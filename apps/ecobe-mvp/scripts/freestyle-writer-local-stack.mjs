@@ -10,9 +10,8 @@ import EmbeddedPostgres from 'embedded-postgres'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const mvpRoot = path.resolve(__dirname, '..')
-const engineRoot = path.resolve(mvpRoot, '..', 'codexecobeengine-clean2', 'ecobe-engine')
-const engineClaudeRoot = path.resolve(mvpRoot, '..', 'ecobe-engineclaude', 'ecobe-engine', 'ecobe-engine')
-const freestyleWriterRoot = path.resolve(mvpRoot, '..', 'freestylewriter')
+const engineRoot = path.resolve(mvpRoot, '..', 'ecobe-engine')
+const freestyleWriterRoot = path.resolve(mvpRoot, '..', '..', '..', 'freestylewriter')
 
 const postgresPort = 35432
 const mvpPort = 3300
@@ -28,6 +27,7 @@ const logDir = path.join(mvpRoot, '.local', 'freestyle-writer-demo', 'logs')
 const postgresDir = path.join(mvpRoot, '.local', 'freestyle-writer-demo', 'postgres')
 const sharedInternalKey = 'replace-with-shared-internal-key'
 const benchmarkMode = process.argv.includes('--benchmark')
+const skipDemo = process.argv.includes('--no-demo')
 
 async function main() {
   fs.mkdirSync(logDir, { recursive: true })
@@ -47,7 +47,6 @@ async function main() {
 
   const processes = []
   let ownsPostgres = false
-  const readOnlyEngineEnv = loadReadOnlyEnv(path.join(engineClaudeRoot, '.env'))
 
   try {
     const postgresRunning = await isPortOpen(postgresPort)
@@ -93,7 +92,7 @@ async function main() {
     })
 
     console.log('Syncing Freestyle Writer schema...')
-    await runCommand('npm', ['run', 'db:push'], {
+    await runCommand('npm', ['run', 'db:push', '--', '--force'], {
       cwd: freestyleWriterRoot,
       env: {
         ...process.env,
@@ -141,7 +140,6 @@ async function main() {
         cwd: engineRoot,
         env: {
           ...process.env,
-          ...readOnlyEngineEnv,
           PORT: String(enginePort),
           DATABASE_URL: engineDbUrl,
           DIRECT_DATABASE_URL: engineDbUrl,
@@ -204,9 +202,15 @@ async function main() {
         NODE_ENV: 'production',
         PORT: String(freestyleWriterPort),
         DATABASE_URL: freestyleWriterDbUrl,
+        SESSION_SECRET: 'local-session-secret',
+        SESSION_COOKIE_SECURE: 'false',
+        AUTH_BYPASS: 'true',
+        AUTH_BYPASS_EMAIL: 'founder@barbankz.local',
         ECOBE_BASE_URL: `http://127.0.0.1:${mvpPort}`,
         ECOBE_API_KEY: bootstrapPayload.apiKey,
         ECOBE_ENVIRONMENT_SLUG: 'production',
+        ECOBE_PRIMARY_PROVIDERS: 'ollama',
+        ECOBE_PREFERRED_REGIONS: 'LOCAL',
       },
       label: 'freestylewriter',
       logFile: path.join(logDir, 'freestylewriter.log'),
@@ -226,9 +230,12 @@ async function main() {
           BARBANK_BENCHMARK_FILTER: process.env.BARBANK_BENCHMARK_FILTER ?? '',
         },
       })
-    } else {
+    } else if (!skipDemo) {
       console.log('Running governed Freestyle Writer demo...')
       await runFreestyleWriterDemo(`http://127.0.0.1:${freestyleWriterPort}`)
+    } else {
+      console.log('Local stack is running. Press Ctrl+C to stop.')
+      await waitForever()
     }
   } finally {
     for (const child of processes.reverse()) {
@@ -265,16 +272,69 @@ async function bootstrapTenant(baseUrl) {
 }
 
 async function runFreestyleWriterDemo(baseUrl) {
-  const response = await fetchWithTimeout(`${baseUrl}/api/generate-lyrics`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
+  const demoEmail = 'founder@barbankz.local'
+  const demoPassword = 'local-demo-password'
+
+  await fetchWithTimeout(
+    `${baseUrl}/api/auth/register`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: demoEmail,
+        password: demoPassword,
+        displayName: 'BarBankz Founder',
+        acceptedTerms: true,
+        acceptedAcceptableUse: true,
+        acceptedPrivacy: true,
+      }),
     },
-    body: JSON.stringify({
-      transcript:
-        "I been up all night with these thoughts on my chest, trying to turn pain into motion, trying to make this pressure pay off before it breaks me.",
-    }),
-  }, 300000)
+    30000,
+  ).catch(() => undefined)
+
+  const loginResponse = await fetchWithTimeout(
+    `${baseUrl}/api/auth/login`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: demoEmail,
+        password: demoPassword,
+      }),
+    },
+    30000,
+  )
+
+  const rawCookies =
+    typeof loginResponse.headers.getSetCookie === 'function'
+      ? loginResponse.headers.getSetCookie()
+      : loginResponse.headers.get('set-cookie')
+        ? [loginResponse.headers.get('set-cookie')]
+        : []
+
+  const cookieHeader = rawCookies
+    .filter(Boolean)
+    .map((value) => String(value).split(';')[0])
+    .join('; ')
+  if (!cookieHeader) {
+    console.warn('No session cookie returned from login; demo request may fail.')
+  }
+
+  const response = await fetchWithTimeout(
+    `${baseUrl}/api/generate-lyrics`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: cookieHeader,
+      },
+      body: JSON.stringify({
+        transcript:
+          "I been up all night with these thoughts on my chest, trying to turn pain into motion, trying to make this pressure pay off before it breaks me.",
+      }),
+    },
+    300000,
+  )
 
   const payload = await response.json()
   console.log(`Freestyle Writer demo status: ${response.status}`)
@@ -488,10 +548,28 @@ async function killPid(pid) {
 
 function resolveInvocation(command, args) {
   if (process.platform === 'win32' && command === 'npm') {
-    return {
-      command: 'cmd.exe',
-      args: ['/d', '/s', '/c', command, ...args],
+    const nodeExe = 'C:\\Program Files\\nodejs\\node.exe'
+    const npmCli = 'C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js'
+    if (fs.existsSync(nodeExe) && fs.existsSync(npmCli)) {
+      return {
+        command: nodeExe,
+        args: [npmCli, ...args],
+      }
     }
+
+    const cmdExe = 'C:\\Windows\\System32\\cmd.exe'
+    const npmCmd = 'C:\\Program Files\\nodejs\\npm.cmd'
+    if (fs.existsSync(cmdExe) && fs.existsSync(npmCmd)) {
+      const escapedArgs = args
+        .map((arg) => (/\s/.test(arg) ? `"${arg.replace(/"/g, '\\"')}"` : arg))
+        .join(' ')
+      return {
+        command: cmdExe,
+        args: ['/c', `"${npmCmd}" ${escapedArgs}`],
+      }
+    }
+
+    return { command, args }
   }
 
   return { command, args }
@@ -548,6 +626,10 @@ async function terminateProcess(child) {
 
   child.kill('SIGTERM')
   await once(child, 'exit').catch(() => undefined)
+}
+
+async function waitForever() {
+  return await new Promise(() => undefined)
 }
 
 main().catch((error) => {
