@@ -1,0 +1,1 @@
+C:/Users/antho/.windsurf/SekedControlPlaneMVP/apps/ecobe-mvp/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe "-D" "C:\Users\antho\.windsurf\SekedControlPlaneMVP\apps\ecobe-mvp\.local\manual-verify-postgres" "-p" "36432"

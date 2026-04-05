@@ -6,6 +6,7 @@ export const env = {
   ECOBE_ENGINE_INTERNAL_KEY: process.env.ECOBE_ENGINE_INTERNAL_KEY ?? '',
   SEKED_URL: (process.env.SEKED_URL ?? '').replace(/\/$/, ''),
   SEKED_INTERNAL_KEY: process.env.SEKED_INTERNAL_KEY ?? '',
+  SEKED_CLARIFY_SCORE_THRESHOLD: Number(process.env.SEKED_CLARIFY_SCORE_THRESHOLD ?? 65),
   CONVERGEOS_URL: (process.env.CONVERGEOS_URL ?? '').replace(/\/$/, ''),
   CONVERGEOS_INTERNAL_KEY: process.env.CONVERGEOS_INTERNAL_KEY ?? '',
   USE_LOCAL_GOVERNANCE_FALLBACK:
@@ -24,6 +25,9 @@ export const env = {
   WEBHOOK_SECRET_ENCRYPTION_KEY: process.env.WEBHOOK_SECRET_ENCRYPTION_KEY ?? '',
   ECOBE_ADMIN_TOKEN: process.env.ECOBE_ADMIN_TOKEN ?? 'ecobe-admin-local',
   NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME ?? 'ECOBE Control Plane',
+  GROQ_API_KEY: process.env.GROQ_API_KEY ?? '',
+  GROQ_BASE_URL: (process.env.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1').replace(/\/$/, ''),
+  GROQ_MODEL: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
   OLLAMA_BASE_URL: (process.env.OLLAMA_BASE_URL ?? '').replace(/\/$/, ''),
   OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? 'qwen2.5:1.5b',
   OLLAMA_NUM_PREDICT: Number(process.env.OLLAMA_NUM_PREDICT ?? 4096),
@@ -36,4 +40,18 @@ export function governanceFallbackAllowed() {
 
 export function engineConfigured() {
   return Boolean(env.ECOBE_ENGINE_URL && env.ECOBE_ENGINE_INTERNAL_KEY)
+}
+
+export function providerConfigured(provider: string) {
+  const normalized = provider.trim().toLowerCase()
+
+  if (normalized === 'groq') {
+    return Boolean(env.GROQ_API_KEY)
+  }
+
+  if (normalized === 'ollama') {
+    return Boolean(env.OLLAMA_BASE_URL)
+  }
+
+  return false
 }

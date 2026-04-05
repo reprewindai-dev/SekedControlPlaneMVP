@@ -29,6 +29,28 @@ The following source repos are read-only inputs and must not be modified from th
 
 This repo may copy from those sources, but does not write back to them.
 
+## Legacy Wrapper Guardrails
+
+The review finding around `_archived/seked-control-plane-wrapper/SekedControlPlaneMVP/src/routes/runs.ts`
+is now guarded at the repo level.
+
+- `legacy/express-wrapper` is the canonical legacy wrapper snapshot in this bundle repo.
+- `_archived/seked-control-plane-wrapper/SekedControlPlaneMVP` is the archived mirror copy.
+- Both copies must stay aligned for schema and runtime files.
+- Validation must run with Prisma `5.22.0`, not an unpinned repo-root Prisma CLI.
+
+Use:
+
+```powershell
+npm run review:legacy-wrapper
+```
+
+That command:
+
+1. checks the canonical legacy wrapper and archived mirror for file drift
+2. validates both wrapper schemas with Prisma `5.22.0`
+3. loads `DATABASE_URL` from each wrapper's `.env` or `.env.example`
+
 ## Product Shape
 
 SEKED is sold as one product, but it operates as a split runtime:

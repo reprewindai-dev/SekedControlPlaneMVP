@@ -1,0 +1,16 @@
+$env:DATABASE_URL = 'postgresql://postgres:postgres@127.0.0.1:35432/ecobe_platform?schema=mvp'
+$env:ECOBE_ENGINE_URL = 'http://127.0.0.1:38080'
+$env:ECOBE_ENGINE_INTERNAL_KEY = 'replace-with-shared-internal-key'
+$env:SEKED_URL = ''
+$env:SEKED_INTERNAL_KEY = ''
+$env:CONVERGEOS_URL = ''
+$env:CONVERGEOS_INTERNAL_KEY = ''
+$env:USE_LOCAL_GOVERNANCE_FALLBACK = 'true'
+$env:AUDIT_SIGNING_SECRET = 'local-audit-secret'
+$env:WEBHOOK_SECRET_ENCRYPTION_KEY = 'local-webhook-secret-32-bytes-minimum'
+$env:ECOBE_ADMIN_TOKEN = 'ecobe-admin-local'
+$env:OLLAMA_BASE_URL = 'http://127.0.0.1:11434'
+$env:OLLAMA_MODEL = 'qwen2.5:1.5b'
+
+Set-Location 'C:\Users\antho\.windsurf\SekedControlPlaneMVP\apps\ecobe-mvp'
+& 'C:\Program Files\nodejs\node.exe' 'C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js' run dev -- --hostname 0.0.0.0 --port 3301

@@ -17,6 +17,7 @@ import organizationsRoutes from './routes/organizations'
 import intelligenceRoutes from './routes/intelligence'
 import gridIntelligenceRoutes from './routes/intelligence/grid'
 import integrationsRoutes from './routes/integrations'
+import internalRoutes from './routes/internal'
 import systemRoutes from './routes/system'
 import dekesHandoffRoutes from './routes/dekes-handoff'
 import carbonLedgerRoutes from './routes/carbon-ledger'
@@ -295,6 +296,7 @@ function attachUiRoute(app: express.Express) {
 }
 
 function attachApiRoutes(app: express.Express) {
+  app.use('/internal/v1', internalRoutes)
   app.use('/api/v1/energy', energyRoutes)
   app.use('/api/v1/dekes', dekesRoutes)
   app.use('/api/v1/route', routingRoutes)

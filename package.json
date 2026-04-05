@@ -10,6 +10,9 @@
     "start:prod": "NODE_ENV=production node dist/server.js",
     "prisma:generate": "prisma generate --schema=_archived/schema.prisma",
     "prisma:migrate": "prisma migrate deploy --schema=_archived/schema.prisma",
+    "check:legacy-wrapper-sync": "node ./scripts/check-legacy-wrapper-sync.mjs",
+    "validate:legacy-wrapper": "node ./scripts/validate-legacy-wrapper.mjs",
+    "review:legacy-wrapper": "npm run check:legacy-wrapper-sync && npm run validate:legacy-wrapper",
     "lint": "eslint src --ext .ts",
     "test": "jest"
   },

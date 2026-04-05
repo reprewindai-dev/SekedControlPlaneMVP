@@ -63,6 +63,10 @@ model Organization {
   webhookEndpoints WebhookEndpoint[]
   webhookDeliveries WebhookDelivery[]
   runEvents       RunEvent[]
+  pglSystems      PglSystem[]
+  pglVersions     PglVersion[]
+  pglLineageEdges PglLineageEdge[]
+  pglLifecycleEvents PglLifecycleEvent[]
 }
 
 model Project {
@@ -197,6 +201,91 @@ model Run {
   usageRecords     UsageRecord[]
   approvalRequest  ApprovalRequest?
   alerts           Alert[]
+  pglSystems       PglSystem[]
+  pglLifecycleEvents PglLifecycleEvent[]
+}
+
+model PglSystem {
+  id             String       @id @default(cuid())
+  organizationId String
+  runId          String?
+  genomeId       String
+  name           String
+  owner          String
+  modelType      String
+  metadata       Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  run            Run?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+  versions       PglVersion[]
+  lifecycleEvents PglLifecycleEvent[]
+  lineageEdges   PglLineageEdge[]
+
+  @@unique([organizationId, genomeId])
+  @@index([organizationId, createdAt])
+}
+
+model PglVersion {
+  id               String         @id @default(cuid())
+  organizationId   String
+  systemId         String
+  versionIdentifier String
+  parentVersionId  String?
+  metadata         Json           @default("{}")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  system           PglSystem      @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  parentVersion    PglVersion?    @relation("PglVersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions    PglVersion[]   @relation("PglVersionParent")
+  parentEdges      PglLineageEdge[] @relation("PglEdgeParent")
+  childEdges       PglLineageEdge[] @relation("PglEdgeChild")
+  lifecycleEvents  PglLifecycleEvent[]
+
+  @@unique([systemId, versionIdentifier])
+  @@index([systemId, createdAt])
+  @@index([organizationId, createdAt])
+}
+
+model PglLineageEdge {
+  id              String       @id @default(cuid())
+  organizationId  String
+  systemId        String
+  parentVersionId String
+  childVersionId  String
+  relationType    String       @default("derived_from")
+  metadata        Json         @default("{}")
+  createdAt       DateTime     @default(now())
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  system          PglSystem    @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  parentVersion   PglVersion   @relation("PglEdgeParent", fields: [parentVersionId], references: [id], onDelete: Cascade)
+  childVersion    PglVersion   @relation("PglEdgeChild", fields: [childVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([systemId, parentVersionId, childVersionId])
+  @@index([systemId, createdAt])
+  @@index([organizationId, createdAt])
+}
+
+model PglLifecycleEvent {
+  id             String       @id @default(cuid())
+  organizationId String
+  systemId       String
+  versionId      String?
+  runId          String?
+  eventType      String
+  payload        Json
+  payloadHash    String?
+  signature      String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  system         PglSystem    @relation(fields: [systemId], references: [id], onDelete: Cascade)
+  version        PglVersion?  @relation(fields: [versionId], references: [id], onDelete: SetNull)
+  run            Run?         @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  @@index([systemId, createdAt])
+  @@index([organizationId, createdAt])
+  @@index([runId, createdAt])
 }
 
 model RunEvent {
