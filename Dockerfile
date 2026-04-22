@@ -3,6 +3,7 @@ WORKDIR /app
 RUN apk add --no-cache openssl libc6-compat
 
 FROM base AS deps
+ENV NODE_ENV=development
 COPY package*.json ./
 RUN npm ci
 
