@@ -1,5 +1,5 @@
 FROM node:24-alpine AS base
-WORKDIR /app
+WORKDIR /
 RUN apk add --no-cache openssl libc6-compat
 
 FROM base AS deps
@@ -18,9 +18,9 @@ ENV NODE_ENV=deployment
 ENV PORT=3000
 
 COPY package*.json ./
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/_archived ./_archived
+COPY --from=deps /node_modules ./node_modules
+COPY --from=build /dist ./dist
+COPY --from=build /_archived ./_archived
 
 RUN npm prune --omit=dev
 
