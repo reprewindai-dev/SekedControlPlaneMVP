@@ -13,9 +13,9 @@ RUN npm run prisma:generate
 RUN npm run build
 
 FROM node:24-alpine AS runtime
-WORKDIR /app
-ENV NODE_ENV=production
-ENV PORT=8080
+WORKDIR /
+ENV NODE_ENV=deployment
+ENV PORT=3000
 
 COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
